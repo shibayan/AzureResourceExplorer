@@ -1,3 +1,0 @@
-﻿interface ICreateModel {
-    createdResourceName: string;
-}

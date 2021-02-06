@@ -1,405 +1,3 @@
-class ClientConfig {
-    static getOverrideFor(childDefinition) {
-        const overrides = ClientConfig.treeBranchDataOverrides.filter(t => childDefinition.url.endsWith(t.childDefinitionUrlSuffix));
-        const override = overrides.length > 0
-            ? overrides[0]
-            : {
-                childDefinitionUrlSuffix: null,
-                getLabel: null,
-                getSortKey: null,
-                getIconNameOverride: null,
-                sortOrder: 1
-            };
-        return override;
-    }
-}
-ClientConfig.treeBranchDataOverrides = [
-    {
-        childDefinitionUrlSuffix: "providers/Microsoft.Resources/deployments/{name}",
-        getLabel: null,
-        getSortKey: (d, label) => d.properties.timestamp,
-        getIconNameOverride: (d) => {
-            switch (d.properties.provisioningState) {
-                case "Succeeded": return "glyphicon glyphicon-ok-circle";
-                case "Running": return "glyphicon glyphicon-play-circle";
-                case "Failed": return "glyphicon glyphicon-remove-circle";
-                default: return null;
-            }
-        },
-        sortOrder: -1
-    },
-    {
-        childDefinitionUrlSuffix: "providers/Microsoft.Resources/deployments/{name}/operations/{name}",
-        getLabel: (d, csmName) => {
-            if (d.properties.targetResource !== undefined && d.properties.targetResource.resourceName !== undefined) {
-                return d.properties.targetResource.resourceName + " (" + d.properties.targetResource.resourceType + ")";
-            }
-            else {
-                return d.properties.provisioningOperation + " (" + d.operationId + ")";
-            }
-        },
-        getSortKey: (d, label) => d.properties.timestamp,
-        getIconNameOverride: (d) => {
-            switch (d.properties.provisioningState) {
-                case "Succeeded": return "glyphicon glyphicon-ok-circle";
-                case "Running": return "glyphicon glyphicon-play-circle";
-                case "Failed": return "glyphicon glyphicon-remove-circle";
-                default: return null;
-            }
-        },
-        sortOrder: -1
-    }
-];
-ClientConfig.aceConfig = {
-    mode: "json",
-    theme: "tomorrow",
-    onLoad: (_ace) => {
-        _ace.setOptions({
-            maxLines: Infinity,
-            fontSize: 15,
-            wrap: "free",
-            showPrintMargin: false
-        });
-        _ace.resize();
-    }
-};
-class DocumentationGenerator {
-    static getDocumentationFlatArray(editorData, doc) {
-        const docArray = [];
-        if (doc) {
-            doc = (doc.properties ? doc.properties : (doc.value ? doc.value[0].properties : {}));
-        }
-        if (editorData && doc) {
-            editorData = (editorData.properties ? editorData.properties : ((editorData.value && editorData.value.length > 0) ? editorData.value[0].properties : {}));
-            const set = {};
-            for (var prop in editorData) {
-                if (editorData.hasOwnProperty(prop) && doc[prop]) {
-                    docArray.push({
-                        name: prop,
-                        doc: doc[prop]
-                    });
-                    set[prop] = 1;
-                }
-            }
-            for (var prop in doc) {
-                if (doc.hasOwnProperty(prop) && !set[prop]) {
-                    docArray.push({
-                        name: prop,
-                        doc: doc[prop]
-                    });
-                }
-            }
-        }
-        else {
-            docArray.push({ name: "message", doc: "No documentation available" });
-        }
-        return ObjectUtils.flattenArray(docArray);
-    }
-}
-var Editor;
-(function (Editor) {
-    Editor[Editor["ResponseEditor"] = 0] = "ResponseEditor";
-    Editor[Editor["RequestEditor"] = 1] = "RequestEditor";
-    Editor[Editor["CreateEditor"] = 2] = "CreateEditor";
-    Editor[Editor["AnsibleEditor"] = 3] = "AnsibleEditor";
-    Editor[Editor["PowershellEditor"] = 4] = "PowershellEditor";
-    Editor[Editor["AzureCliEditor"] = 5] = "AzureCliEditor";
-})(Editor || (Editor = {}));
-class EditorCollection {
-    constructor() {
-        this.editors = [null, null, null, null, null, null];
-        this.editors[Editor.ResponseEditor] = ace.edit("response-json-editor");
-        this.editors[Editor.RequestEditor] = ace.edit("request-json-editor");
-        this.editors[Editor.CreateEditor] = ace.edit("json-create-editor");
-        this.editors[Editor.AnsibleEditor] = ace.edit("ansible-editor");
-        this.editors.length = 4;
-    }
-    isHidden(editor) {
-        return editor === Editor.AzureCliEditor || editor === Editor.PowershellEditor;
-    }
-    getValue(editor, cleanObject) {
-        const currentEditor = this.editors[editor];
-        let value = JSON.parse(currentEditor.getValue());
-        if (cleanObject)
-            ObjectUtils.cleanObject(value);
-        return value;
-    }
-    setValue(editor, stringValue) {
-        if (this.isHidden(editor)) {
-            return;
-        }
-        const currentEditor = this.editors[editor];
-        currentEditor.setValue(stringValue);
-        currentEditor.session.selection.clearSelection();
-        currentEditor.moveCursorTo(0, 0);
-    }
-    setMode(editor, mode) {
-        if (this.isHidden(editor)) {
-            return;
-        }
-        const currentEditor = this.editors[editor];
-        currentEditor.getSession().setMode(mode);
-    }
-    setTheme(editor, theme) {
-        if (this.isHidden(editor)) {
-            return;
-        }
-        const currentEditor = this.editors[editor];
-        currentEditor.setTheme(theme);
-    }
-    setShowGutter(editor, showGutter) {
-        if (this.isHidden(editor)) {
-            return;
-        }
-        const currentEditor = this.editors[editor];
-        currentEditor.renderer.setShowGutter(showGutter);
-    }
-    setReadOnly(editor, setBackground) {
-        if (this.isHidden(editor)) {
-            return;
-        }
-        const currentEditor = this.editors[editor];
-        setBackground = typeof setBackground !== 'undefined' ? setBackground : true;
-        currentEditor.setOptions({
-            readOnly: true,
-            highlightActiveLine: false,
-            highlightGutterLine: false
-        });
-        const virtualRenderer = currentEditor.renderer;
-        virtualRenderer.$cursorLayer.element.style.opacity = 0;
-        virtualRenderer.setStyle("disabled", true);
-        if (setBackground)
-            currentEditor.container.style.background = "#f5f5f5";
-        currentEditor.blur();
-    }
-    apply(callbackFn) {
-        this.editors.map(callbackFn);
-    }
-    resize(editor) {
-        if (this.isHidden(editor)) {
-            return;
-        }
-        const currentEditor = this.editors[editor];
-        currentEditor.resize();
-    }
-    configureEditors() {
-        this.editors.map((editor) => {
-            editor.setOptions({
-                maxLines: Infinity,
-                fontSize: 15,
-                wrap: "free",
-                showPrintMargin: false
-            });
-            editor.setTheme("ace/theme/tomorrow");
-            editor.getSession().setMode("ace/mode/json");
-            editor.getSession().setNewLineMode("windows");
-            const commandManager = editor.commands;
-            commandManager.removeCommand("find");
-        });
-        this.setReadOnly(Editor.ResponseEditor);
-        this.setValue(Editor.ResponseEditor, StringUtils.stringify({ message: "Select a node to start" }));
-        this.setReadOnly(Editor.PowershellEditor, false);
-        this.setReadOnly(Editor.AnsibleEditor, false);
-        this.setReadOnly(Editor.AzureCliEditor, false);
-        this.setTheme(Editor.PowershellEditor, "ace/theme/tomorrow_night_blue");
-        this.setTheme(Editor.AzureCliEditor, "ace/theme/tomorrow_night_blue");
-        this.setShowGutter(Editor.PowershellEditor, false);
-        this.setShowGutter(Editor.AnsibleEditor, false);
-        this.setShowGutter(Editor.AzureCliEditor, false);
-        this.setMode(Editor.PowershellEditor, "ace/mode/powershell");
-        this.setValue(Editor.PowershellEditor, "# PowerShell equivalent script");
-        this.setMode(Editor.AnsibleEditor, "ace/mode/yaml");
-        this.setValue(Editor.AnsibleEditor, "# Ansible Playbooks");
-        this.setMode(Editor.AzureCliEditor, "ace/mode/sh");
-        this.setValue(Editor.AzureCliEditor, "# Azure CLI 2.0 equivalent script");
-    }
-}
-class ObjectUtils {
-    static isEmptyObjectOrArray(obj) {
-        if (typeof obj === "number" || typeof obj === "boolean")
-            return false;
-        if ($.isEmptyObject(obj))
-            return true;
-        if (obj === null || obj === "" || obj.length === 0)
-            return true;
-        return false;
-    }
-    static flattenArray(array) {
-        for (var i = 0; i < array.length; i++) {
-            if (typeof array[i].doc !== "string") {
-                var flat = ObjectUtils.flattenObject(array[i].name, array[i].doc);
-                var first = array.slice(0, i);
-                var end = array.slice(i + 1);
-                array = first.concat(flat).concat(end);
-                i += flat.length - 1;
-            }
-        }
-        return array;
-    }
-    static flattenObject(prefix, object) {
-        var flat = [];
-        if (typeof object === "string") {
-            flat.push({
-                name: prefix,
-                doc: object
-            });
-        }
-        else if (Array.isArray(object)) {
-            flat = flat.concat(ObjectUtils.flattenObject(prefix, object[0]));
-        }
-        else if (ObjectUtils.isEmptyObjectOrArray(object)) {
-            flat.push({
-                name: prefix,
-                doc: ""
-            });
-        }
-        else {
-            for (var prop in object) {
-                if (object.hasOwnProperty(prop)) {
-                    if (typeof object[prop] === "string") {
-                        flat.push({
-                            name: prefix + "." + prop,
-                            doc: object[prop]
-                        });
-                    }
-                    else if (Array.isArray(object[prop]) && object[prop].length > 0) {
-                        flat = flat.concat(ObjectUtils.flattenObject(prefix + "." + prop, object[prop][0]));
-                    }
-                    else if (typeof object[prop] === "object") {
-                        flat = flat.concat(ObjectUtils.flattenObject(prefix + "." + prop, object[prop]));
-                    }
-                    else {
-                        flat.push({
-                            name: prefix,
-                            doc: object
-                        });
-                    }
-                }
-            }
-        }
-        return flat;
-    }
-    static sortByObject(toBeSorted, toSortBy) {
-        if (toBeSorted === toSortBy)
-            return toBeSorted;
-        const sorted = {};
-        for (var key in toSortBy) {
-            if (toSortBy.hasOwnProperty(key)) {
-                var obj;
-                if (typeof toSortBy[key] === "object" && !Array.isArray(toSortBy[key]) && toSortBy[key] != null) {
-                    obj = ObjectUtils.sortByObject(toBeSorted[key], toSortBy[key]);
-                }
-                else {
-                    obj = toBeSorted[key];
-                }
-                sorted[key] = obj;
-            }
-        }
-        for (var key in toBeSorted) {
-            if (toBeSorted.hasOwnProperty(key) && sorted[key] === undefined) {
-                sorted[key] = toBeSorted[key];
-            }
-        }
-        return sorted;
-    }
-    static cleanObject(obj) {
-        const hadProperties = (obj.properties !== undefined);
-        ObjectUtils.recursiveCleanObject(obj);
-        if (hadProperties && !obj.properties) {
-            obj.properties = {};
-        }
-    }
-    static recursiveCleanObject(obj) {
-        for (let property in obj) {
-            if (obj.hasOwnProperty(property)) {
-                if (typeof obj[property] === "string" && (/^\(.*\)$/.test(obj[property]))) {
-                    delete obj[property];
-                }
-                else if (Array.isArray(obj[property])) {
-                    const hadElements = obj[property].length > 0;
-                    obj[property] = obj[property].filter((element) => {
-                        if (typeof element === "string" && (/^\(.*\)$/.test(element))) {
-                            return false;
-                        }
-                        else if (typeof element === "object" && !$.isEmptyObject(element)) {
-                            this.recursiveCleanObject(element);
-                        }
-                        else if (typeof element === "object" && $.isEmptyObject(element)) {
-                            return false;
-                        }
-                        if ($.isPlainObject(element) && $.isEmptyObject(element))
-                            return false;
-                        return true;
-                    });
-                    if (hadElements && obj[property].length === 0)
-                        delete obj[property];
-                }
-                else if (typeof obj[property] === "object" && !$.isEmptyObject(obj[property])) {
-                    this.recursiveCleanObject(obj[property]);
-                    if ($.isEmptyObject(obj[property]))
-                        delete obj[property];
-                }
-                else if (typeof obj[property] === "object" && $.isEmptyObject(obj[property])) {
-                    delete obj[property];
-                }
-            }
-        }
-    }
-    static mergeObject(source, target) {
-        for (let sourceProperty in source) {
-            if (source.hasOwnProperty(sourceProperty) && target.hasOwnProperty(sourceProperty)) {
-                if (!ObjectUtils.isEmptyObjectOrArray(source[sourceProperty]) && (typeof source[sourceProperty] === "object") && !Array.isArray(source[sourceProperty])) {
-                    ObjectUtils.mergeObject(source[sourceProperty], target[sourceProperty]);
-                }
-                else if (Array.isArray(source[sourceProperty]) && Array.isArray(target[sourceProperty])) {
-                    var targetModel = target[sourceProperty][0];
-                    target[sourceProperty] = source[sourceProperty];
-                    target[sourceProperty].push(targetModel);
-                }
-                else {
-                    target[sourceProperty] = source[sourceProperty];
-                }
-            }
-            else if (source.hasOwnProperty(sourceProperty)) {
-                target[sourceProperty] = source[sourceProperty];
-            }
-        }
-        return target;
-    }
-    static getPsObjectFromJson(json, nestingLevel) {
-        var tabs = "";
-        for (var i = 0; i < nestingLevel; i++) {
-            tabs += "\t";
-        }
-        var jsonObj = JSON.parse(json);
-        if (typeof jsonObj === "string") {
-            return "\"" + jsonObj + "\"";
-        }
-        else if (typeof jsonObj === "boolean") {
-            return jsonObj.toString();
-        }
-        else if (typeof jsonObj === "number") {
-            return jsonObj.toString();
-        }
-        else if (Array.isArray(jsonObj)) {
-            var result = "(\n";
-            for (var i = 0; i < jsonObj.length; i++) {
-                result += tabs + "\t" + ObjectUtils.getPsObjectFromJson(JSON.stringify(jsonObj[i]), nestingLevel + 1) + "\n";
-            }
-            return result + tabs + ")";
-        }
-        else if (typeof jsonObj === "object") {
-            var result = "@{\n";
-            for (var prop in jsonObj) {
-                if (jsonObj.hasOwnProperty(prop)) {
-                    result += tabs + "\t" + prop + " = " + ObjectUtils.getPsObjectFromJson(JSON.stringify(jsonObj[prop]), nestingLevel + 1) + "\n";
-                }
-            }
-            return result + tabs + "}\n";
-        }
-        return json;
-    }
-}
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -409,766 +7,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-class ResourceDefinitionCollection {
-    constructor(repository) {
-        this.repository = repository;
-        this.resourcesDefinitionsTable = [];
-    }
-    isSupportedTreeNode(url) {
-        const splits = url.split("/");
-        return (splits.length === 4) && ResourceDefinitionCollection.supportedRootNodes.includes(splits[3].toLowerCase());
-    }
-    getTable() {
-        return this.resourcesDefinitionsTable;
-    }
-    getTreeNodes() {
-        return this.resourcesDefinitionsTable.filter((rd) => { return this.isSupportedTreeNode(rd.url); })
-            .getUnique((rd) => { return rd.url.split("/")[3]; }).map((urd) => {
-            const treeBranch = new TreeBranch(urd.url.split("/")[3]);
-            treeBranch.resourceDefinition = urd;
-            treeBranch.data = undefined;
-            treeBranch.resource_icon = "fa fa-cube fa-fw";
-            treeBranch.children = [];
-            treeBranch.elementUrl = urd.url;
-            treeBranch.sortValue = null;
-            treeBranch.iconNameOverride = null;
-            return treeBranch;
-        });
-    }
-    getResourceDefinitionByNameAndUrl(name, url) {
-        const resourceDefinitions = this.getMatchingDefinitions(r => (r.resourceName === name) &&
-            ((r.url.toLowerCase() === url.toLowerCase()) ||
-                r.url.toLowerCase() === (url.toLowerCase() + "/" + name.toLowerCase())));
-        if (resourceDefinitions.length > 1) {
-            console.log("ASSERT! duplicate ids in resourceDefinitionsTable");
-            console.log(resourceDefinitions);
-        }
-        return resourceDefinitions[0];
-    }
-    getMatchingDefinitions(predicate) {
-        return this.resourcesDefinitionsTable.filter(predicate);
-    }
-    fixOperationUrl(operation) {
-        if (operation.Url.indexOf("SourceControls/{name}") !== -1) {
-            operation.Url = operation.Url.replace("SourceControls/{name}", "SourceControls/{sourceControlName}");
-        }
-        if (operation.Url.indexOf("serverFarms/{name}") !== -1) {
-            operation.Url = operation.Url.replace("serverFarms/{name}", "serverFarms/{webHostingPlanName}");
-        }
-        if (operation.Url.indexOf("resourcegroups") !== -1) {
-            operation.Url = operation.Url.replace("resourcegroups", "resourceGroups");
-        }
-        if (operation.Url.endsWith("/")) {
-            operation.Url = operation.Url.substring(0, operation.Url.length - 1);
-        }
-        return operation;
-    }
-    removeActionLessDefinitions() {
-        for (let index = this.resourcesDefinitionsTable.length - 1; index >= 0; index--) {
-            const resourceDefinition = this.resourcesDefinitionsTable[index];
-            if (resourceDefinition.hideFromExplorerView()) {
-                this.resourcesDefinitionsTable.splice(index, 1);
-            }
-        }
-    }
-    buildResourceDefinitions() {
-        return __awaiter(this, void 0, void 0, function* () {
-            const applicableProviders = yield this.repository.getApplicableProvidersAsync();
-            const applicableOperationsResponse = yield this.repository.getApplicableOperations(applicableProviders);
-            const applicableOperations = applicableOperationsResponse.data;
-            applicableOperations.sort((a, b) => { return a.Url.localeCompare(b.Url); });
-            applicableOperations.map((operation) => {
-                operation = this.fixOperationUrl(operation);
-                this.addOperation(operation);
-            });
-            this.sortChildren();
-            this.removeActionLessDefinitions();
-        });
-    }
-    sortChildren() {
-        this.resourcesDefinitionsTable.map((resourceDefinition) => {
-            var children = resourceDefinition.children;
-            if (typeof children !== "string" && Array.isArray(children)) {
-                children.sort();
-            }
-        });
-    }
-    setParent(url, action, requestBody, requestBodyDoc, apiVersion) {
-        var segments = url.split("/").filter(a => a.length !== 0);
-        var resourceName = segments.pop();
-        var parentName = url.substring(0, url.lastIndexOf("/"));
-        if (parentName === undefined || parentName === "" || resourceName === undefined)
-            return;
-        var parents = this.resourcesDefinitionsTable.filter(rd => rd.url.toLowerCase() === parentName.toLowerCase());
-        var parent;
-        if (parents.length === 1) {
-            parent = parents[0];
-            if (resourceName.match(/\{.*\}/g)) {
-                if (parent.children === undefined || typeof parent.children === "string") {
-                    parent.children = resourceName;
-                }
-                else {
-                    console.log("ASSERT1, typeof parent.children: " + typeof parent.children);
-                }
-            }
-            else if (resourceName !== "list") {
-                if (parent.children === undefined) {
-                    parent.children = [resourceName];
-                }
-                else if (Array.isArray(parent.children)) {
-                    if (parent.children.filter(c => c === resourceName).length === 0) {
-                        parent.children.push(resourceName);
-                    }
-                }
-                else {
-                    parent.children = [resourceName];
-                    console.log("ASSERT2, typeof parent.children: " + typeof parent.children);
-                }
-            }
-        }
-        else {
-            parent = this.addOperation(undefined, url.substring(0, url.lastIndexOf("/")));
-            this.setParent(url);
-        }
-        if (action && parent && parent.actions.filter(c => c === action).length === 0) {
-            parent.actions.push(action);
-        }
-        if (requestBody && parent && !parent.requestBody) {
-            parent.requestBody = requestBody;
-        }
-        if (requestBodyDoc && parent && !parent.requestBodyDoc) {
-            parent.requestBodyDoc = requestBodyDoc;
-        }
-        if (apiVersion && parent && !parent.apiVersion) {
-            parent.apiVersion = apiVersion;
-        }
-    }
-    addOperation(operation, url) {
-        url = (operation ? operation.Url : url);
-        url = url.replace(/{.*?}/g, "{name}");
-        var segments = url.split("/").filter(a => a.length !== 0);
-        var resourceName = segments.pop();
-        var addedElement = undefined;
-        if (resourceName === "list" && operation && operation.HttpMethod === "POST") {
-            this.setParent(url, "GETPOST", operation.RequestBody, operation.RequestBodyDoc, operation.ApiVersion);
-            return addedElement;
-        }
-        else if (operation && (operation.MethodName.startsWith("Create") || operation.MethodName.startsWith("BeginCreate") || operation.MethodName.startsWith("Put")) && operation.HttpMethod === "PUT") {
-            this.setParent(url, "CREATE", operation.RequestBody, operation.RequestBodyDoc);
-            if (operation.MethodName.indexOf("Updat") === -1) {
-                return addedElement;
-            }
-        }
-        var elements = this.resourcesDefinitionsTable.filter(r => r.url.toLowerCase() === url.toLowerCase());
-        if (elements.length === 1) {
-            if (operation) {
-                elements[0].requestBody = (elements[0].requestBody ? elements[0].requestBody : operation.RequestBody);
-                elements[0].apiVersion = operation.ApiVersion;
-                if (elements[0].actions.filter(c => c === operation.HttpMethod).length === 0) {
-                    elements[0].actions.push(operation.HttpMethod);
-                }
-                if (operation.HttpMethod === "GET") {
-                    elements[0].responseBodyDoc = operation.ResponseBodyDoc;
-                }
-                else if (operation.HttpMethod === "PUT") {
-                    elements[0].requestBodyDoc = operation.RequestBodyDoc;
-                }
-            }
-        }
-        else {
-            addedElement = new ResourceDefinition();
-            addedElement.resourceName = resourceName;
-            addedElement.children = undefined;
-            addedElement.actions = (operation ? [operation.HttpMethod] : []);
-            addedElement.url = url;
-            addedElement.requestBody = operation ? operation.RequestBody : {},
-                addedElement.requestBodyDoc = operation ? operation.RequestBodyDoc : {},
-                addedElement.responseBodyDoc = operation ? operation.ResponseBodyDoc : {},
-                addedElement.query = operation ? operation.Query : [],
-                addedElement.apiVersion = operation && operation.ApiVersion ? operation.ApiVersion : undefined;
-            this.resourcesDefinitionsTable.push(addedElement);
-        }
-        this.setParent(url);
-        return addedElement;
-    }
-    getActionsAndVerbs(treeBranch) {
-        const actions = [];
-        if (treeBranch.resourceDefinition.actions.includes("DELETE")) {
-            actions.push(new Action("DELETE", "Delete", treeBranch.getGetActionUrl()));
-        }
-        const children = treeBranch.resourceDefinition.children;
-        if (typeof children !== "string" && Array.isArray(children)) {
-            children.filter(childString => {
-                var matchingDefinition = this.getMatchingDefinitions(r => (r.resourceName === childString) &&
-                    ((r.url === treeBranch.resourceDefinition.url) || r.url === (treeBranch.resourceDefinition.url + "/" + childString)));
-                return matchingDefinition.length === 1;
-            }).map(childString => {
-                var resourceDefinition = this.getResourceDefinitionByNameAndUrl(childString, treeBranch.resourceDefinition.url + "/" + childString);
-                if (resourceDefinition.children === undefined && Array.isArray(resourceDefinition.actions) && resourceDefinition.actions.filter(actionName => actionName === "POST").length > 0) {
-                    const newAction = new Action("POST", resourceDefinition.resourceName, treeBranch.getGetActionUrl() + "/" + resourceDefinition.resourceName);
-                    newAction.requestBody = (resourceDefinition.requestBody ? StringUtils.stringify(resourceDefinition.requestBody) : undefined);
-                    newAction.query = resourceDefinition.query;
-                    actions.push(newAction);
-                }
-            });
-        }
-        return actions;
-    }
-}
-ResourceDefinitionCollection.supportedRootNodes = ['providers', 'subscriptions'];
-var armExplorer;
-(function (armExplorer) {
-    class AnsibleScriptGenerator {
-        constructor(resolver, resourceDefinition) {
-            this.resolver = resolver;
-            this.script = "";
-            this.actionsIndex = 0;
-            this.resourceDefinition = {};
-            this.resourceDefinition = resourceDefinition;
-        }
-        getScript(cmdActionPair) {
-            const cmdParameters = this.resolver.getParameters();
-            let currentScript = "";
-            currentScript += "- hosts: localhost\n";
-            currentScript += "  tasks:\n";
-            switch (cmdActionPair.cmd) {
-                case CmdType.Get: {
-                    currentScript += '    - name: GET ' + this.resolver.getActionName() + '\n';
-                    currentScript += '      azure_rm_resource_facts:\n';
-                    currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
-                    break;
-                }
-                case CmdType.New: {
-                    if (cmdActionPair.isSetAction) {
-                        currentScript += '    - name: SET ' + this.resolver.getActionName() + '\n';
-                        currentScript += '      azure_rm_resource:\n';
-                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
-                    }
-                    else {
-                        currentScript += '    - name: CREATE ' + this.resolver.getActionName() + '\n';
-                        currentScript += '      azure_rm_resource:\n';
-                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
-                    }
-                    if (this.resourceDefinition.requestBody) {
-                        currentScript += "        body:\n";
-                        currentScript += this.yamlFromObject(this.resourceDefinition.requestBody, "          ");
-                    }
-                    break;
-                }
-                case CmdType.Set: {
-                    currentScript += '    - name: SET ' + this.resolver.getActionNameFromList() + '\n';
-                    currentScript += '      azure_rm_resource:\n';
-                    currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
-                    if (this.resourceDefinition.requestBody) {
-                        currentScript += "        body:\n";
-                        currentScript += this.yamlFromObject(this.resourceDefinition.requestBody, "          ");
-                    }
-                    break;
-                }
-                case CmdType.RemoveAction: {
-                    currentScript += '    - name: DELETE ' + this.resolver.getActionNameFromAction(this.actionsIndex) + '\n';
-                    currentScript += '      azure_rm_resource:\n';
-                    currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
-                    currentScript += "        state: absent\n";
-                    this.actionsIndex++;
-                    break;
-                }
-                case CmdType.Invoke:
-                case CmdType.InvokeAction: {
-                    if (cmdActionPair.isAction) {
-                        currentScript += '    - name: Action ' + this.resolver.getActionNameFromAction(this.actionsIndex) + '\n';
-                        currentScript += '      azure_rm_resource:\n';
-                        currentScript += '        method: POST\n';
-                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
-                        const body = this.resolver.getActionParameters(this.actionsIndex).requestBody;
-                        if (body) {
-                            currentScript += "        body:\n";
-                            currentScript += this.yamlFromObject(JSON.parse(body), "          ");
-                        }
-                        this.actionsIndex++;
-                    }
-                    else {
-                        currentScript += '    - name: LIST ' + this.resolver.getActionNameFromList() + '\n';
-                        currentScript += '      azure_rm_resource:\n';
-                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
-                    }
-                    break;
-                }
-                case CmdType.NewResourceGroup: {
-                    currentScript += '    - name: CREATE ' + this.resolver.getActionName() + '\n';
-                    currentScript += '      azure_rm_resource:\n';
-                    currentScript += "        api_version: '" + cmdParameters.apiVersion + "'\n";
-                    currentScript += '        resource_group: NewResourceGroup\n';
-                    currentScript += '        body:\n';
-                    currentScript += '          location: eastus\n';
-                    break;
-                }
-            }
-            return currentScript + "\n\n";
-        }
-        yamlFromObject(o, prefix) {
-            let yaml = "";
-            let __this = this;
-            for (let key in o) {
-                if (typeof o[key] === 'object') {
-                    if (Array.isArray(o[key])) {
-                        yaml += prefix + key + ":\n";
-                        o[key].forEach(function (e) {
-                            if (typeof e != 'object') {
-                                yaml += prefix + "  - " + e + "\n";
-                            }
-                            else {
-                                yaml += __this.yamlFromObject(e, prefix + "  - ");
-                            }
-                        });
-                    }
-                    else {
-                        yaml += prefix + key + ":\n";
-                        yaml += this.yamlFromObject(o[key], prefix + "  ");
-                    }
-                }
-                else {
-                    yaml += prefix + key + ": " + o[key] + "\n";
-                }
-                if (prefix.indexOf('-') >= 0)
-                    prefix = prefix.replace('-', ' ');
-            }
-            return yaml;
-        }
-        yamlFromResourceId(cmdActionPair, prefix) {
-            let yaml = "";
-            const cmdParameters = this.resolver.getParameters();
-            switch (cmdParameters.resourceIdentifier.resourceIdentifierType) {
-                case armExplorer.ResourceIdentifierType.WithIDOnly: {
-                    yaml += prefix + "api_version: '" + cmdParameters.apiVersion + "'\n";
-                    yaml += prefix + "url: " + cmdParameters.resourceIdentifier.resourceId + "\n";
-                    break;
-                }
-                case armExplorer.ResourceIdentifierType.WithGroupType: {
-                    yaml += prefix + "api_version: '" + cmdParameters.apiVersion + "'\n";
-                    yaml += prefix + "resource_group: '" + cmdParameters.resourceIdentifier.resourceGroup + "'\n";
-                    yaml += prefix + "provider: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[0].split('.')[1] + "'\n";
-                    yaml += prefix + "resource_type: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[1] + "'\n";
-                    if (cmdActionPair.cmd == CmdType.New && !cmdActionPair.isSetAction) {
-                        yaml += prefix + "resource_name: '{{ name }}'\n";
-                    }
-                    break;
-                }
-                case armExplorer.ResourceIdentifierType.WithGroupTypeName: {
-                    yaml += prefix + "api_version: '" + cmdParameters.apiVersion + "'\n";
-                    yaml += prefix + "resource_group: '" + cmdParameters.resourceIdentifier.resourceGroup + "'\n";
-                    yaml += prefix + "provider: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[0].split('.')[1] + "'\n";
-                    yaml += prefix + "resource_type: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[1] + "'\n";
-                    const split_name = cmdParameters.resourceIdentifier.resourceName.split('/');
-                    yaml += prefix + "resource_name: '" + split_name[0] + "'\n";
-                    if (split_name.length > 1) {
-                        yaml += prefix + "subresource:\n";
-                        yaml += prefix + "  - type: " + split_name[1] + "\n";
-                    }
-                    else if (cmdActionPair.isAction) {
-                        yaml += prefix + "subresource:\n";
-                        yaml += prefix + "  - type: " + this.resolver.getActionNameFromAction(this.actionsIndex) + "\n";
-                    }
-                    break;
-                }
-            }
-            return yaml;
-        }
-    }
-    armExplorer.AnsibleScriptGenerator = AnsibleScriptGenerator;
-})(armExplorer || (armExplorer = {}));
-class ResourcesCache {
-    constructor(repository) {
-        this.repository = repository;
-        this.suggestionSortFunc = (a, b) => {
-            var result = a.type.compare(b.type, true);
-            if (result === 0) {
-                return a.name.compare(b.name, true);
-            }
-            return result;
-        };
-        this.isResourceCacheRefreshing = false;
-        this.currentSearchKeyword = "";
-    }
-    cacheExpired() {
-        return (Date.now() - this.timestamp) > ResourcesCache.resourceCacheExpiration;
-    }
-    clearCache() {
-        this.data = {};
-        this.timestamp = Date.now();
-    }
-    refresh() {
-        return __awaiter(this, void 0, void 0, function* () {
-            try {
-                if (!this.cacheExpired() && !this.isResourceCacheRefreshing) {
-                    this.isResourceCacheRefreshing = true;
-                    const searchResponse = yield this.repository.searchKeyword("");
-                    const response = searchResponse.data;
-                    this.clearCache();
-                    response.forEach((item) => { this.data[item.id] = item; });
-                }
-            }
-            catch (error) {
-                console.log(error);
-            }
-            finally {
-                this.isResourceCacheRefreshing = false;
-            }
-        });
-    }
-    setSearchKeyword(keyword) {
-        this.currentSearchKeyword = keyword;
-    }
-    getSearchKeyword() {
-        return this.currentSearchKeyword;
-    }
-    getSuggestions(keyword) {
-        var results = [];
-        for (var itemKey in this.data) {
-            var item = this.data[itemKey];
-            if (item && item.name && item.type &&
-                (item.name.toLowerCase().indexOf(keyword.toLowerCase()) > -1 || item.type.toLowerCase().indexOf(keyword.toLowerCase()) > -1)) {
-                results.push(item);
-            }
-        }
-        results.sort(this.suggestionSortFunc);
-        return results;
-    }
-}
-ResourcesCache.resourceCacheExpiration = 5 * 60 * 1000;
-class ResourceSearcher {
-    constructor(resourceSearchModel, repository) {
-        this.resourceSearchModel = resourceSearchModel;
-        this.repository = repository;
-        this.resourceSearchCache = new ResourcesCache(repository);
-        this.resourceSearchCache.refresh();
-    }
-    resourceSearch() {
-        return __awaiter(this, void 0, void 0, function* () {
-            this.resourceSearchCache.refresh();
-            var keyword = this.resourceSearchModel.searchKeyword || "";
-            this.resourceSearchCache.setSearchKeyword(keyword);
-            const results = this.resourceSearchCache.getSuggestions(keyword);
-            this.resourceSearchModel.setSuggestions(results);
-            if (this.resourceSearchModel.getSuggestions().length > 0) {
-                this.resourceSearchModel.turnOnSuggestions();
-            }
-            else {
-                this.resourceSearchModel.turnOffSuggestions();
-            }
-            if (this.resourceSearchCache.getSearchKeyword()) {
-                const searchResponse = yield this.repository.searchKeyword(keyword);
-                const searchResults = searchResponse.data;
-                searchResults.forEach((item) => {
-                    if (keyword === this.resourceSearchCache.data.currentKeyword && !this.resourceSearchCache.data[item.id]) {
-                        this.resourceSearchModel.addSuggestion(item);
-                    }
-                    this.resourceSearchCache.data[item.id] = item;
-                });
-            }
-        });
-    }
-}
-class ResourceSearchDataModel {
-    constructor() {
-        this.isSuggestListDisplay = false;
-        this.suggestions = [];
-    }
-    turnOffSuggestions() {
-        this.isSuggestListDisplay = false;
-    }
-    turnOnSuggestions() {
-        this.isSuggestListDisplay = true;
-    }
-    addSuggestion(suggestion) {
-        this.suggestions.push(suggestion);
-    }
-    setSuggestions(suggestions) {
-        this.suggestions = suggestions;
-    }
-    getSuggestions() {
-        return this.suggestions;
-    }
-}
-class ExplorerScreen {
-    static showReadOnlyConfirmation(event) {
-        if (event) {
-            const clickedButton = $(event.currentTarget);
-            const readonlyConfirmation = $("#readonly-confirm-box");
-            const offset = (clickedButton.outerHeight() < 40 ? 8 : 0);
-            readonlyConfirmation.css({ top: (clickedButton.offset().top - clickedButton.outerHeight(true) - offset) + 'px', left: (clickedButton.offset().left + clickedButton.outerWidth()) + 'px' });
-            $("#dark-blocker").show();
-            readonlyConfirmation.show();
-        }
-    }
-    static showDeleteConfirmation(event, deleteClickHandler) {
-        const deleteButton = $(event.currentTarget);
-        const deleteConfirmation = $("#delete-confirm-box");
-        deleteConfirmation.css({ top: (deleteButton.offset().top - (((deleteButton.outerHeight() + 10) / 2))) + 'px', left: (deleteButton.offset().left + deleteButton.outerWidth()) + 'px' });
-        $("#yes-delete-confirm").off("click").click(deleteClickHandler);
-        $("#dark-blocker").show();
-        deleteConfirmation.show();
-    }
-    static fadeInAndFadeOutSuccess() {
-        setTimeout(() => {
-            $(".success-marker").fadeIn(1500);
-            setTimeout(() => {
-                $(".success-marker").fadeOut(1500);
-            }, 1200);
-        }, 500);
-    }
-    static fadeInAndFadeOutError() {
-        setTimeout(() => {
-            $(".failure-marker").fadeIn(1500);
-            setTimeout(() => {
-                $(".failure-marker").fadeOut(1500);
-            }, 1200);
-        }, 500);
-    }
-}
-class StringUtils {
-    static selectiveUrlencode(url) {
-        return url.replace(/\#/g, '%23').replace(/\s/g, '%20');
-    }
-    static stringify(object) {
-        return JSON.stringify(object, undefined, 2);
-    }
-    static escapeHtmlEntities(str) {
-        return $('<div/>').text(str).html();
-    }
-    static syntaxHighlight(json) {
-        if (typeof json === "string")
-            return StringUtils.escapeHtmlEntities(json);
-        let str = this.stringify(json);
-        str = StringUtils.escapeHtmlEntities(str);
-        return str.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
-            var cls = 'number';
-            if (/^"/.test(match)) {
-                if (/:$/.test(match)) {
-                    cls = 'key';
-                }
-                else {
-                    cls = 'string';
-                }
-            }
-            else if (/true|false/.test(match)) {
-                cls = 'boolean';
-            }
-            else if (/null/.test(match)) {
-                cls = 'null';
-            }
-            if (cls === 'string' && ((match.slice(0, "\"http://".length) == "\"http://") || (match.slice(0, "\"https://".length) == "\"https://"))) {
-                match = match.replace("/api/", "/");
-                return '<span><a class="json-link" target="_blank" href=' + match + '>' + match + '</a></span>';
-            }
-            else {
-                return '<span class="' + cls + '">' + match + '</span>';
-            }
-        });
-    }
-}
-class TenantCollection {
-    constructor(repository) {
-        this.repository = repository;
-        this.tenants = [];
-    }
-    getTenants() {
-        return this.tenants;
-    }
-    getSelectedTenant() {
-        return this.selectedTenant;
-    }
-    buildTenants() {
-        return __awaiter(this, void 0, void 0, function* () {
-            let tenantsResponse = yield this.repository.getTenants();
-            let tenantsData = tenantsResponse.data;
-            this.tenants = tenantsData.map(tenant => {
-                return {
-                    name: tenant.DisplayName + " (" + tenant.DomainName + ")",
-                    id: tenant.TenantId,
-                    current: tenant.Current
-                };
-            });
-            this.selectedTenant = this.tenants[this.tenants.indexOfDelegate(tenant => tenant.current)];
-        });
-    }
-}
-if (!Element.prototype.documentOffsetTop) {
-    Element.prototype.documentOffsetTop = function () {
-        return this.offsetTop + (this.offsetParent ? this.offsetParent.documentOffsetTop() : 0);
-    };
-}
-var armExplorer;
-(function (armExplorer) {
-    class StringDictionary {
-        constructor() {
-            this.items = {};
-        }
-        contains(key) {
-            return this.items.hasOwnProperty(key);
-        }
-        put(key, value) {
-            this.items[key] = value;
-        }
-        get(key) {
-            return this.items[key];
-        }
-    }
-    armExplorer.StringDictionary = StringDictionary;
-})(armExplorer || (armExplorer = {}));
-if (!String.prototype.compare) {
-    String.prototype.compare = function (target, ignoreCase) {
-        var selfValue = this;
-        var targetValue = target || "";
-        if (ignoreCase) {
-            selfValue = selfValue.toLowerCase();
-            targetValue = targetValue.toLowerCase();
-        }
-        if (selfValue > targetValue) {
-            return 1;
-        }
-        else if (selfValue < targetValue) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    };
-}
-if (!String.prototype.startsWith) {
-    String.prototype.startsWith = function (str) {
-        return this.slice(0, str.length) === str;
-    };
-}
-if (!String.prototype.endsWith) {
-    String.prototype.endsWith = function (str) {
-        return this.indexOf(str, this.length - str.length) !== -1;
-    };
-}
-if (!String.prototype.contains) {
-    String.prototype.contains = function (str, ignoreCase) {
-        var selfValue = this;
-        var searchValue = str || "";
-        if (ignoreCase) {
-            selfValue = selfValue.toLowerCase();
-            searchValue = searchValue.toLowerCase();
-        }
-        return selfValue.indexOf(searchValue) !== -1;
-    };
-}
-if (!Array.prototype.includes) {
-    Array.prototype.includes = function (searchElement) {
-        if (this === undefined || this === null) {
-            throw new TypeError('Cannot convert this value to object');
-        }
-        var O = Object(this);
-        var len = parseInt(O.length) || 0;
-        if (len === 0) {
-            return false;
-        }
-        var k = 0;
-        while (k < len) {
-            var currentElement = O[k];
-            if (searchElement === currentElement ||
-                (searchElement !== searchElement && currentElement !== currentElement)) {
-                return true;
-            }
-            k++;
-        }
-        return false;
-    };
-}
-Array.prototype.remove = function (from, to) {
-    var rest = this.slice((to || from) + 1 || this.length);
-    this.length = from < 0 ? this.length + from : from;
-    return this.push.apply(this, rest);
-};
-Array.prototype.getUnique = function (getValue) {
-    var u = {}, a = [];
-    for (var i = 0, l = this.length; i < l; ++i) {
-        var value = getValue(this[i]);
-        if (u.hasOwnProperty(value)) {
-            continue;
-        }
-        a.push(this[i]);
-        u[value] = 1;
-    }
-    return a;
-};
-Array.prototype.indexOfDelegate = function (predicate, fromIndex) {
-    var k;
-    if (this == null) {
-        throw new TypeError('"this" is null or not defined');
-    }
-    var O = Object(this);
-    var len = O.length >>> 0;
-    if (len === 0) {
-        return -1;
-    }
-    var n = +fromIndex || 0;
-    if (Math.abs(n) === Infinity) {
-        n = 0;
-    }
-    if (n >= len) {
-        return -1;
-    }
-    k = Math.max(n >= 0 ? n : len - Math.abs(n), 0);
-    while (k < len) {
-        var kValue;
-        if (k in O && predicate(O[k])) {
-            return k;
-        }
-        k++;
-    }
-    return -1;
-};
-if (!Array.prototype.some) {
-    Array.prototype.some = function (fun) {
-        'use strict';
-        if (this == null) {
-            throw new TypeError('Array.prototype.some called on null or undefined');
-        }
-        if (typeof fun !== 'function') {
-            throw new TypeError();
-        }
-        var t = Object(this);
-        var len = t.length >>> 0;
-        var thisArg = arguments.length >= 2 ? arguments[1] : void 0;
-        for (var i = 0; i < len; i++) {
-            if (i in t && fun.call(thisArg, t[i], i, t)) {
-                return true;
-            }
-        }
-        return false;
-    };
-}
-if (!Array.prototype.last) {
-    Array.prototype.last = function () {
-        return this[this.length - 1];
-    };
-}
-;
-if (!Array.prototype.find) {
-    Array.prototype.find = function (predicate) {
-        if (this == null) {
-            throw new TypeError('Array.prototype.find called on null or undefined');
-        }
-        if (typeof predicate !== 'function') {
-            throw new TypeError('predicate must be a function');
-        }
-        var list = Object(this);
-        var length = list.length >>> 0;
-        var thisArg = arguments[1];
-        var value;
-        for (var i = 0; i < length; i++) {
-            value = list[i];
-            if (predicate.call(thisArg, value, i, list)) {
-                return value;
-            }
-        }
-        return undefined;
-    };
-}
 var armExplorer;
 (function (armExplorer) {
     angular.module("armExplorer", ["ngRoute", "ngAnimate", "ngSanitize", "ui.bootstrap", "angularBootstrapNavTree", "rx", "mp.resizer", "ui.ace"])
@@ -1937,6 +775,1078 @@ var armExplorer;
         }
     });
 })(armExplorer || (armExplorer = {}));
+class ArmClientRepository {
+    constructor($http) {
+        this.$http = $http;
+    }
+    getApplicableProvidersAsync() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const applicableProvidersConfig = { method: "GET", url: "api/providers" };
+            return yield this.$http(applicableProvidersConfig);
+        });
+    }
+    getApplicableOperations(providers) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const postProviders = { method: "POST", url: "api/all-operations", data: JSON.stringify(providers.data) };
+            return yield this.$http(postProviders);
+        });
+    }
+    getTenants() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const tenantsConfig = { method: "GET", url: "api/tenants" };
+            return yield this.$http(tenantsConfig);
+        });
+    }
+    getUserToken() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const userTokenConfig = { method: "GET", url: "api/token" };
+            return yield this.$http(userTokenConfig);
+        });
+    }
+    searchKeyword(keyword) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const searchConfig = { method: "GET", url: `api/search?keyword=${keyword}` };
+            return yield this.$http(searchConfig);
+        });
+    }
+    invokeAction(selectedResource, action, actionsModel) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const invokeConfig = {
+                method: "POST",
+                url: "api/operations",
+                data: {
+                    Url: action.url,
+                    RequestBody: action.getRequestBody(),
+                    HttpMethod: action.httpMethod,
+                    ApiVersion: selectedResource.apiVersion,
+                    QueryString: action.getQueryString(actionsModel)
+                }
+            };
+            return yield this.$http(invokeConfig);
+        });
+    }
+    invokeHttp(httpConfig) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return yield this.$http(httpConfig);
+        });
+    }
+    invokePut(selectedResource, action, editorCollection) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const userObject = editorCollection.getValue(Editor.RequestEditor, true);
+            const invokePutConfig = {
+                method: "POST",
+                url: "api/operations",
+                data: {
+                    Url: selectedResource.putUrl,
+                    HttpMethod: action.httpMethod,
+                    RequestBody: userObject,
+                    ApiVersion: selectedResource.apiVersion
+                }
+            };
+            return yield this.$http(invokePutConfig);
+        });
+    }
+    invokeCreate(newResourceName, selectedResource, action, editorCollection) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const userObject = editorCollection.getValue(Editor.CreateEditor, true);
+            const invokeCreateConfig = {
+                method: "POST",
+                url: "api/operations",
+                data: {
+                    Url: selectedResource.putUrl + "/" + newResourceName,
+                    HttpMethod: "PUT",
+                    RequestBody: userObject,
+                    ApiVersion: selectedResource.apiVersion
+                }
+            };
+            return yield this.$http(invokeCreateConfig);
+        });
+    }
+    getProvidersForSubscription(subscriptionId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const getProvidersConfig = {
+                method: "GET",
+                url: `api/operations/providers/${subscriptionId}`
+            };
+            return yield this.$http(getProvidersConfig);
+        });
+    }
+}
+class ClientConfig {
+    static getOverrideFor(childDefinition) {
+        const overrides = ClientConfig.treeBranchDataOverrides.filter(t => childDefinition.url.endsWith(t.childDefinitionUrlSuffix));
+        const override = overrides.length > 0
+            ? overrides[0]
+            : {
+                childDefinitionUrlSuffix: null,
+                getLabel: null,
+                getSortKey: null,
+                getIconNameOverride: null,
+                sortOrder: 1
+            };
+        return override;
+    }
+}
+ClientConfig.treeBranchDataOverrides = [
+    {
+        childDefinitionUrlSuffix: "providers/Microsoft.Resources/deployments/{name}",
+        getLabel: null,
+        getSortKey: (d, label) => d.properties.timestamp,
+        getIconNameOverride: (d) => {
+            switch (d.properties.provisioningState) {
+                case "Succeeded": return "glyphicon glyphicon-ok-circle";
+                case "Running": return "glyphicon glyphicon-play-circle";
+                case "Failed": return "glyphicon glyphicon-remove-circle";
+                default: return null;
+            }
+        },
+        sortOrder: -1
+    },
+    {
+        childDefinitionUrlSuffix: "providers/Microsoft.Resources/deployments/{name}/operations/{name}",
+        getLabel: (d, csmName) => {
+            if (d.properties.targetResource !== undefined && d.properties.targetResource.resourceName !== undefined) {
+                return d.properties.targetResource.resourceName + " (" + d.properties.targetResource.resourceType + ")";
+            }
+            else {
+                return d.properties.provisioningOperation + " (" + d.operationId + ")";
+            }
+        },
+        getSortKey: (d, label) => d.properties.timestamp,
+        getIconNameOverride: (d) => {
+            switch (d.properties.provisioningState) {
+                case "Succeeded": return "glyphicon glyphicon-ok-circle";
+                case "Running": return "glyphicon glyphicon-play-circle";
+                case "Failed": return "glyphicon glyphicon-remove-circle";
+                default: return null;
+            }
+        },
+        sortOrder: -1
+    }
+];
+ClientConfig.aceConfig = {
+    mode: "json",
+    theme: "tomorrow",
+    onLoad: (_ace) => {
+        _ace.setOptions({
+            maxLines: Infinity,
+            fontSize: 15,
+            wrap: "free",
+            showPrintMargin: false
+        });
+        _ace.resize();
+    }
+};
+class DocumentationGenerator {
+    static getDocumentationFlatArray(editorData, doc) {
+        const docArray = [];
+        if (doc) {
+            doc = (doc.properties ? doc.properties : (doc.value ? doc.value[0].properties : {}));
+        }
+        if (editorData && doc) {
+            editorData = (editorData.properties ? editorData.properties : ((editorData.value && editorData.value.length > 0) ? editorData.value[0].properties : {}));
+            const set = {};
+            for (var prop in editorData) {
+                if (editorData.hasOwnProperty(prop) && doc[prop]) {
+                    docArray.push({
+                        name: prop,
+                        doc: doc[prop]
+                    });
+                    set[prop] = 1;
+                }
+            }
+            for (var prop in doc) {
+                if (doc.hasOwnProperty(prop) && !set[prop]) {
+                    docArray.push({
+                        name: prop,
+                        doc: doc[prop]
+                    });
+                }
+            }
+        }
+        else {
+            docArray.push({ name: "message", doc: "No documentation available" });
+        }
+        return ObjectUtils.flattenArray(docArray);
+    }
+}
+var Editor;
+(function (Editor) {
+    Editor[Editor["ResponseEditor"] = 0] = "ResponseEditor";
+    Editor[Editor["RequestEditor"] = 1] = "RequestEditor";
+    Editor[Editor["CreateEditor"] = 2] = "CreateEditor";
+    Editor[Editor["AnsibleEditor"] = 3] = "AnsibleEditor";
+    Editor[Editor["PowershellEditor"] = 4] = "PowershellEditor";
+    Editor[Editor["AzureCliEditor"] = 5] = "AzureCliEditor";
+})(Editor || (Editor = {}));
+class EditorCollection {
+    constructor() {
+        this.editors = [null, null, null, null, null, null];
+        this.editors[Editor.ResponseEditor] = ace.edit("response-json-editor");
+        this.editors[Editor.RequestEditor] = ace.edit("request-json-editor");
+        this.editors[Editor.CreateEditor] = ace.edit("json-create-editor");
+        this.editors[Editor.AnsibleEditor] = ace.edit("ansible-editor");
+        this.editors.length = 4;
+    }
+    isHidden(editor) {
+        return editor === Editor.AzureCliEditor || editor === Editor.PowershellEditor;
+    }
+    getValue(editor, cleanObject) {
+        const currentEditor = this.editors[editor];
+        let value = JSON.parse(currentEditor.getValue());
+        if (cleanObject)
+            ObjectUtils.cleanObject(value);
+        return value;
+    }
+    setValue(editor, stringValue) {
+        if (this.isHidden(editor)) {
+            return;
+        }
+        const currentEditor = this.editors[editor];
+        currentEditor.setValue(stringValue);
+        currentEditor.session.selection.clearSelection();
+        currentEditor.moveCursorTo(0, 0);
+    }
+    setMode(editor, mode) {
+        if (this.isHidden(editor)) {
+            return;
+        }
+        const currentEditor = this.editors[editor];
+        currentEditor.getSession().setMode(mode);
+    }
+    setTheme(editor, theme) {
+        if (this.isHidden(editor)) {
+            return;
+        }
+        const currentEditor = this.editors[editor];
+        currentEditor.setTheme(theme);
+    }
+    setShowGutter(editor, showGutter) {
+        if (this.isHidden(editor)) {
+            return;
+        }
+        const currentEditor = this.editors[editor];
+        currentEditor.renderer.setShowGutter(showGutter);
+    }
+    setReadOnly(editor, setBackground) {
+        if (this.isHidden(editor)) {
+            return;
+        }
+        const currentEditor = this.editors[editor];
+        setBackground = typeof setBackground !== 'undefined' ? setBackground : true;
+        currentEditor.setOptions({
+            readOnly: true,
+            highlightActiveLine: false,
+            highlightGutterLine: false
+        });
+        const virtualRenderer = currentEditor.renderer;
+        virtualRenderer.$cursorLayer.element.style.opacity = 0;
+        virtualRenderer.setStyle("disabled", true);
+        if (setBackground)
+            currentEditor.container.style.background = "#f5f5f5";
+        currentEditor.blur();
+    }
+    apply(callbackFn) {
+        this.editors.map(callbackFn);
+    }
+    resize(editor) {
+        if (this.isHidden(editor)) {
+            return;
+        }
+        const currentEditor = this.editors[editor];
+        currentEditor.resize();
+    }
+    configureEditors() {
+        this.editors.map((editor) => {
+            editor.setOptions({
+                maxLines: Infinity,
+                fontSize: 15,
+                wrap: "free",
+                showPrintMargin: false
+            });
+            editor.setTheme("ace/theme/tomorrow");
+            editor.getSession().setMode("ace/mode/json");
+            editor.getSession().setNewLineMode("windows");
+            const commandManager = editor.commands;
+            commandManager.removeCommand("find");
+        });
+        this.setReadOnly(Editor.ResponseEditor);
+        this.setValue(Editor.ResponseEditor, StringUtils.stringify({ message: "Select a node to start" }));
+        this.setReadOnly(Editor.PowershellEditor, false);
+        this.setReadOnly(Editor.AnsibleEditor, false);
+        this.setReadOnly(Editor.AzureCliEditor, false);
+        this.setTheme(Editor.PowershellEditor, "ace/theme/tomorrow_night_blue");
+        this.setTheme(Editor.AzureCliEditor, "ace/theme/tomorrow_night_blue");
+        this.setShowGutter(Editor.PowershellEditor, false);
+        this.setShowGutter(Editor.AnsibleEditor, false);
+        this.setShowGutter(Editor.AzureCliEditor, false);
+        this.setMode(Editor.PowershellEditor, "ace/mode/powershell");
+        this.setValue(Editor.PowershellEditor, "# PowerShell equivalent script");
+        this.setMode(Editor.AnsibleEditor, "ace/mode/yaml");
+        this.setValue(Editor.AnsibleEditor, "# Ansible Playbooks");
+        this.setMode(Editor.AzureCliEditor, "ace/mode/sh");
+        this.setValue(Editor.AzureCliEditor, "# Azure CLI 2.0 equivalent script");
+    }
+}
+class ExplorerScreen {
+    static showReadOnlyConfirmation(event) {
+        if (event) {
+            const clickedButton = $(event.currentTarget);
+            const readonlyConfirmation = $("#readonly-confirm-box");
+            const offset = (clickedButton.outerHeight() < 40 ? 8 : 0);
+            readonlyConfirmation.css({ top: (clickedButton.offset().top - clickedButton.outerHeight(true) - offset) + 'px', left: (clickedButton.offset().left + clickedButton.outerWidth()) + 'px' });
+            $("#dark-blocker").show();
+            readonlyConfirmation.show();
+        }
+    }
+    static showDeleteConfirmation(event, deleteClickHandler) {
+        const deleteButton = $(event.currentTarget);
+        const deleteConfirmation = $("#delete-confirm-box");
+        deleteConfirmation.css({ top: (deleteButton.offset().top - (((deleteButton.outerHeight() + 10) / 2))) + 'px', left: (deleteButton.offset().left + deleteButton.outerWidth()) + 'px' });
+        $("#yes-delete-confirm").off("click").click(deleteClickHandler);
+        $("#dark-blocker").show();
+        deleteConfirmation.show();
+    }
+    static fadeInAndFadeOutSuccess() {
+        setTimeout(() => {
+            $(".success-marker").fadeIn(1500);
+            setTimeout(() => {
+                $(".success-marker").fadeOut(1500);
+            }, 1200);
+        }, 500);
+    }
+    static fadeInAndFadeOutError() {
+        setTimeout(() => {
+            $(".failure-marker").fadeIn(1500);
+            setTimeout(() => {
+                $(".failure-marker").fadeOut(1500);
+            }, 1200);
+        }, 500);
+    }
+}
+class ResourceDefinitionCollection {
+    constructor(repository) {
+        this.repository = repository;
+        this.resourcesDefinitionsTable = [];
+    }
+    isSupportedTreeNode(url) {
+        const splits = url.split("/");
+        return (splits.length === 4) && ResourceDefinitionCollection.supportedRootNodes.includes(splits[3].toLowerCase());
+    }
+    getTable() {
+        return this.resourcesDefinitionsTable;
+    }
+    getTreeNodes() {
+        return this.resourcesDefinitionsTable.filter((rd) => { return this.isSupportedTreeNode(rd.url); })
+            .getUnique((rd) => { return rd.url.split("/")[3]; }).map((urd) => {
+            const treeBranch = new TreeBranch(urd.url.split("/")[3]);
+            treeBranch.resourceDefinition = urd;
+            treeBranch.data = undefined;
+            treeBranch.resource_icon = "fa fa-cube fa-fw";
+            treeBranch.children = [];
+            treeBranch.elementUrl = urd.url;
+            treeBranch.sortValue = null;
+            treeBranch.iconNameOverride = null;
+            return treeBranch;
+        });
+    }
+    getResourceDefinitionByNameAndUrl(name, url) {
+        const resourceDefinitions = this.getMatchingDefinitions(r => (r.resourceName === name) &&
+            ((r.url.toLowerCase() === url.toLowerCase()) ||
+                r.url.toLowerCase() === (url.toLowerCase() + "/" + name.toLowerCase())));
+        if (resourceDefinitions.length > 1) {
+            console.log("ASSERT! duplicate ids in resourceDefinitionsTable");
+            console.log(resourceDefinitions);
+        }
+        return resourceDefinitions[0];
+    }
+    getMatchingDefinitions(predicate) {
+        return this.resourcesDefinitionsTable.filter(predicate);
+    }
+    fixOperationUrl(operation) {
+        if (operation.Url.indexOf("SourceControls/{name}") !== -1) {
+            operation.Url = operation.Url.replace("SourceControls/{name}", "SourceControls/{sourceControlName}");
+        }
+        if (operation.Url.indexOf("serverFarms/{name}") !== -1) {
+            operation.Url = operation.Url.replace("serverFarms/{name}", "serverFarms/{webHostingPlanName}");
+        }
+        if (operation.Url.indexOf("resourcegroups") !== -1) {
+            operation.Url = operation.Url.replace("resourcegroups", "resourceGroups");
+        }
+        if (operation.Url.endsWith("/")) {
+            operation.Url = operation.Url.substring(0, operation.Url.length - 1);
+        }
+        return operation;
+    }
+    removeActionLessDefinitions() {
+        for (let index = this.resourcesDefinitionsTable.length - 1; index >= 0; index--) {
+            const resourceDefinition = this.resourcesDefinitionsTable[index];
+            if (resourceDefinition.hideFromExplorerView()) {
+                this.resourcesDefinitionsTable.splice(index, 1);
+            }
+        }
+    }
+    buildResourceDefinitions() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const applicableProviders = yield this.repository.getApplicableProvidersAsync();
+            const applicableOperationsResponse = yield this.repository.getApplicableOperations(applicableProviders);
+            const applicableOperations = applicableOperationsResponse.data;
+            applicableOperations.sort((a, b) => { return a.Url.localeCompare(b.Url); });
+            applicableOperations.map((operation) => {
+                operation = this.fixOperationUrl(operation);
+                this.addOperation(operation);
+            });
+            this.sortChildren();
+            this.removeActionLessDefinitions();
+        });
+    }
+    sortChildren() {
+        this.resourcesDefinitionsTable.map((resourceDefinition) => {
+            var children = resourceDefinition.children;
+            if (typeof children !== "string" && Array.isArray(children)) {
+                children.sort();
+            }
+        });
+    }
+    setParent(url, action, requestBody, requestBodyDoc, apiVersion) {
+        var segments = url.split("/").filter(a => a.length !== 0);
+        var resourceName = segments.pop();
+        var parentName = url.substring(0, url.lastIndexOf("/"));
+        if (parentName === undefined || parentName === "" || resourceName === undefined)
+            return;
+        var parents = this.resourcesDefinitionsTable.filter(rd => rd.url.toLowerCase() === parentName.toLowerCase());
+        var parent;
+        if (parents.length === 1) {
+            parent = parents[0];
+            if (resourceName.match(/\{.*\}/g)) {
+                if (parent.children === undefined || typeof parent.children === "string") {
+                    parent.children = resourceName;
+                }
+                else {
+                    console.log("ASSERT1, typeof parent.children: " + typeof parent.children);
+                }
+            }
+            else if (resourceName !== "list") {
+                if (parent.children === undefined) {
+                    parent.children = [resourceName];
+                }
+                else if (Array.isArray(parent.children)) {
+                    if (parent.children.filter(c => c === resourceName).length === 0) {
+                        parent.children.push(resourceName);
+                    }
+                }
+                else {
+                    parent.children = [resourceName];
+                    console.log("ASSERT2, typeof parent.children: " + typeof parent.children);
+                }
+            }
+        }
+        else {
+            parent = this.addOperation(undefined, url.substring(0, url.lastIndexOf("/")));
+            this.setParent(url);
+        }
+        if (action && parent && parent.actions.filter(c => c === action).length === 0) {
+            parent.actions.push(action);
+        }
+        if (requestBody && parent && !parent.requestBody) {
+            parent.requestBody = requestBody;
+        }
+        if (requestBodyDoc && parent && !parent.requestBodyDoc) {
+            parent.requestBodyDoc = requestBodyDoc;
+        }
+        if (apiVersion && parent && !parent.apiVersion) {
+            parent.apiVersion = apiVersion;
+        }
+    }
+    addOperation(operation, url) {
+        url = (operation ? operation.Url : url);
+        url = url.replace(/{.*?}/g, "{name}");
+        var segments = url.split("/").filter(a => a.length !== 0);
+        var resourceName = segments.pop();
+        var addedElement = undefined;
+        if (resourceName === "list" && operation && operation.HttpMethod === "POST") {
+            this.setParent(url, "GETPOST", operation.RequestBody, operation.RequestBodyDoc, operation.ApiVersion);
+            return addedElement;
+        }
+        else if (operation && (operation.MethodName.startsWith("Create") || operation.MethodName.startsWith("BeginCreate") || operation.MethodName.startsWith("Put")) && operation.HttpMethod === "PUT") {
+            this.setParent(url, "CREATE", operation.RequestBody, operation.RequestBodyDoc);
+            if (operation.MethodName.indexOf("Updat") === -1) {
+                return addedElement;
+            }
+        }
+        var elements = this.resourcesDefinitionsTable.filter(r => r.url.toLowerCase() === url.toLowerCase());
+        if (elements.length === 1) {
+            if (operation) {
+                elements[0].requestBody = (elements[0].requestBody ? elements[0].requestBody : operation.RequestBody);
+                elements[0].apiVersion = operation.ApiVersion;
+                if (elements[0].actions.filter(c => c === operation.HttpMethod).length === 0) {
+                    elements[0].actions.push(operation.HttpMethod);
+                }
+                if (operation.HttpMethod === "GET") {
+                    elements[0].responseBodyDoc = operation.ResponseBodyDoc;
+                }
+                else if (operation.HttpMethod === "PUT") {
+                    elements[0].requestBodyDoc = operation.RequestBodyDoc;
+                }
+            }
+        }
+        else {
+            addedElement = new ResourceDefinition();
+            addedElement.resourceName = resourceName;
+            addedElement.children = undefined;
+            addedElement.actions = (operation ? [operation.HttpMethod] : []);
+            addedElement.url = url;
+            addedElement.requestBody = operation ? operation.RequestBody : {},
+                addedElement.requestBodyDoc = operation ? operation.RequestBodyDoc : {},
+                addedElement.responseBodyDoc = operation ? operation.ResponseBodyDoc : {},
+                addedElement.query = operation ? operation.Query : [],
+                addedElement.apiVersion = operation && operation.ApiVersion ? operation.ApiVersion : undefined;
+            this.resourcesDefinitionsTable.push(addedElement);
+        }
+        this.setParent(url);
+        return addedElement;
+    }
+    getActionsAndVerbs(treeBranch) {
+        const actions = [];
+        if (treeBranch.resourceDefinition.actions.includes("DELETE")) {
+            actions.push(new Action("DELETE", "Delete", treeBranch.getGetActionUrl()));
+        }
+        const children = treeBranch.resourceDefinition.children;
+        if (typeof children !== "string" && Array.isArray(children)) {
+            children.filter(childString => {
+                var matchingDefinition = this.getMatchingDefinitions(r => (r.resourceName === childString) &&
+                    ((r.url === treeBranch.resourceDefinition.url) || r.url === (treeBranch.resourceDefinition.url + "/" + childString)));
+                return matchingDefinition.length === 1;
+            }).map(childString => {
+                var resourceDefinition = this.getResourceDefinitionByNameAndUrl(childString, treeBranch.resourceDefinition.url + "/" + childString);
+                if (resourceDefinition.children === undefined && Array.isArray(resourceDefinition.actions) && resourceDefinition.actions.filter(actionName => actionName === "POST").length > 0) {
+                    const newAction = new Action("POST", resourceDefinition.resourceName, treeBranch.getGetActionUrl() + "/" + resourceDefinition.resourceName);
+                    newAction.requestBody = (resourceDefinition.requestBody ? StringUtils.stringify(resourceDefinition.requestBody) : undefined);
+                    newAction.query = resourceDefinition.query;
+                    actions.push(newAction);
+                }
+            });
+        }
+        return actions;
+    }
+}
+ResourceDefinitionCollection.supportedRootNodes = ['providers', 'subscriptions'];
+class ResourceSearchDataModel {
+    constructor() {
+        this.isSuggestListDisplay = false;
+        this.suggestions = [];
+    }
+    turnOffSuggestions() {
+        this.isSuggestListDisplay = false;
+    }
+    turnOnSuggestions() {
+        this.isSuggestListDisplay = true;
+    }
+    addSuggestion(suggestion) {
+        this.suggestions.push(suggestion);
+    }
+    setSuggestions(suggestions) {
+        this.suggestions = suggestions;
+    }
+    getSuggestions() {
+        return this.suggestions;
+    }
+}
+class ResourceSearcher {
+    constructor(resourceSearchModel, repository) {
+        this.resourceSearchModel = resourceSearchModel;
+        this.repository = repository;
+        this.resourceSearchCache = new ResourcesCache(repository);
+        this.resourceSearchCache.refresh();
+    }
+    resourceSearch() {
+        return __awaiter(this, void 0, void 0, function* () {
+            this.resourceSearchCache.refresh();
+            var keyword = this.resourceSearchModel.searchKeyword || "";
+            this.resourceSearchCache.setSearchKeyword(keyword);
+            const results = this.resourceSearchCache.getSuggestions(keyword);
+            this.resourceSearchModel.setSuggestions(results);
+            if (this.resourceSearchModel.getSuggestions().length > 0) {
+                this.resourceSearchModel.turnOnSuggestions();
+            }
+            else {
+                this.resourceSearchModel.turnOffSuggestions();
+            }
+            if (this.resourceSearchCache.getSearchKeyword()) {
+                const searchResponse = yield this.repository.searchKeyword(keyword);
+                const searchResults = searchResponse.data;
+                searchResults.forEach((item) => {
+                    if (keyword === this.resourceSearchCache.data.currentKeyword && !this.resourceSearchCache.data[item.id]) {
+                        this.resourceSearchModel.addSuggestion(item);
+                    }
+                    this.resourceSearchCache.data[item.id] = item;
+                });
+            }
+        });
+    }
+}
+class ResourcesCache {
+    constructor(repository) {
+        this.repository = repository;
+        this.suggestionSortFunc = (a, b) => {
+            var result = a.type.compare(b.type, true);
+            if (result === 0) {
+                return a.name.compare(b.name, true);
+            }
+            return result;
+        };
+        this.isResourceCacheRefreshing = false;
+        this.currentSearchKeyword = "";
+    }
+    cacheExpired() {
+        return (Date.now() - this.timestamp) > ResourcesCache.resourceCacheExpiration;
+    }
+    clearCache() {
+        this.data = {};
+        this.timestamp = Date.now();
+    }
+    refresh() {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                if (!this.cacheExpired() && !this.isResourceCacheRefreshing) {
+                    this.isResourceCacheRefreshing = true;
+                    const searchResponse = yield this.repository.searchKeyword("");
+                    const response = searchResponse.data;
+                    this.clearCache();
+                    response.forEach((item) => { this.data[item.id] = item; });
+                }
+            }
+            catch (error) {
+                console.log(error);
+            }
+            finally {
+                this.isResourceCacheRefreshing = false;
+            }
+        });
+    }
+    setSearchKeyword(keyword) {
+        this.currentSearchKeyword = keyword;
+    }
+    getSearchKeyword() {
+        return this.currentSearchKeyword;
+    }
+    getSuggestions(keyword) {
+        var results = [];
+        for (var itemKey in this.data) {
+            var item = this.data[itemKey];
+            if (item && item.name && item.type &&
+                (item.name.toLowerCase().indexOf(keyword.toLowerCase()) > -1 || item.type.toLowerCase().indexOf(keyword.toLowerCase()) > -1)) {
+                results.push(item);
+            }
+        }
+        results.sort(this.suggestionSortFunc);
+        return results;
+    }
+}
+ResourcesCache.resourceCacheExpiration = 5 * 60 * 1000;
+class ObjectUtils {
+    static isEmptyObjectOrArray(obj) {
+        if (typeof obj === "number" || typeof obj === "boolean")
+            return false;
+        if ($.isEmptyObject(obj))
+            return true;
+        if (obj === null || obj === "" || obj.length === 0)
+            return true;
+        return false;
+    }
+    static flattenArray(array) {
+        for (var i = 0; i < array.length; i++) {
+            if (typeof array[i].doc !== "string") {
+                var flat = ObjectUtils.flattenObject(array[i].name, array[i].doc);
+                var first = array.slice(0, i);
+                var end = array.slice(i + 1);
+                array = first.concat(flat).concat(end);
+                i += flat.length - 1;
+            }
+        }
+        return array;
+    }
+    static flattenObject(prefix, object) {
+        var flat = [];
+        if (typeof object === "string") {
+            flat.push({
+                name: prefix,
+                doc: object
+            });
+        }
+        else if (Array.isArray(object)) {
+            flat = flat.concat(ObjectUtils.flattenObject(prefix, object[0]));
+        }
+        else if (ObjectUtils.isEmptyObjectOrArray(object)) {
+            flat.push({
+                name: prefix,
+                doc: ""
+            });
+        }
+        else {
+            for (var prop in object) {
+                if (object.hasOwnProperty(prop)) {
+                    if (typeof object[prop] === "string") {
+                        flat.push({
+                            name: prefix + "." + prop,
+                            doc: object[prop]
+                        });
+                    }
+                    else if (Array.isArray(object[prop]) && object[prop].length > 0) {
+                        flat = flat.concat(ObjectUtils.flattenObject(prefix + "." + prop, object[prop][0]));
+                    }
+                    else if (typeof object[prop] === "object") {
+                        flat = flat.concat(ObjectUtils.flattenObject(prefix + "." + prop, object[prop]));
+                    }
+                    else {
+                        flat.push({
+                            name: prefix,
+                            doc: object
+                        });
+                    }
+                }
+            }
+        }
+        return flat;
+    }
+    static sortByObject(toBeSorted, toSortBy) {
+        if (toBeSorted === toSortBy)
+            return toBeSorted;
+        const sorted = {};
+        for (var key in toSortBy) {
+            if (toSortBy.hasOwnProperty(key)) {
+                var obj;
+                if (typeof toSortBy[key] === "object" && !Array.isArray(toSortBy[key]) && toSortBy[key] != null) {
+                    obj = ObjectUtils.sortByObject(toBeSorted[key], toSortBy[key]);
+                }
+                else {
+                    obj = toBeSorted[key];
+                }
+                sorted[key] = obj;
+            }
+        }
+        for (var key in toBeSorted) {
+            if (toBeSorted.hasOwnProperty(key) && sorted[key] === undefined) {
+                sorted[key] = toBeSorted[key];
+            }
+        }
+        return sorted;
+    }
+    static cleanObject(obj) {
+        const hadProperties = (obj.properties !== undefined);
+        ObjectUtils.recursiveCleanObject(obj);
+        if (hadProperties && !obj.properties) {
+            obj.properties = {};
+        }
+    }
+    static recursiveCleanObject(obj) {
+        for (let property in obj) {
+            if (obj.hasOwnProperty(property)) {
+                if (typeof obj[property] === "string" && (/^\(.*\)$/.test(obj[property]))) {
+                    delete obj[property];
+                }
+                else if (Array.isArray(obj[property])) {
+                    const hadElements = obj[property].length > 0;
+                    obj[property] = obj[property].filter((element) => {
+                        if (typeof element === "string" && (/^\(.*\)$/.test(element))) {
+                            return false;
+                        }
+                        else if (typeof element === "object" && !$.isEmptyObject(element)) {
+                            this.recursiveCleanObject(element);
+                        }
+                        else if (typeof element === "object" && $.isEmptyObject(element)) {
+                            return false;
+                        }
+                        if ($.isPlainObject(element) && $.isEmptyObject(element))
+                            return false;
+                        return true;
+                    });
+                    if (hadElements && obj[property].length === 0)
+                        delete obj[property];
+                }
+                else if (typeof obj[property] === "object" && !$.isEmptyObject(obj[property])) {
+                    this.recursiveCleanObject(obj[property]);
+                    if ($.isEmptyObject(obj[property]))
+                        delete obj[property];
+                }
+                else if (typeof obj[property] === "object" && $.isEmptyObject(obj[property])) {
+                    delete obj[property];
+                }
+            }
+        }
+    }
+    static mergeObject(source, target) {
+        for (let sourceProperty in source) {
+            if (source.hasOwnProperty(sourceProperty) && target.hasOwnProperty(sourceProperty)) {
+                if (!ObjectUtils.isEmptyObjectOrArray(source[sourceProperty]) && (typeof source[sourceProperty] === "object") && !Array.isArray(source[sourceProperty])) {
+                    ObjectUtils.mergeObject(source[sourceProperty], target[sourceProperty]);
+                }
+                else if (Array.isArray(source[sourceProperty]) && Array.isArray(target[sourceProperty])) {
+                    var targetModel = target[sourceProperty][0];
+                    target[sourceProperty] = source[sourceProperty];
+                    target[sourceProperty].push(targetModel);
+                }
+                else {
+                    target[sourceProperty] = source[sourceProperty];
+                }
+            }
+            else if (source.hasOwnProperty(sourceProperty)) {
+                target[sourceProperty] = source[sourceProperty];
+            }
+        }
+        return target;
+    }
+    static getPsObjectFromJson(json, nestingLevel) {
+        var tabs = "";
+        for (var i = 0; i < nestingLevel; i++) {
+            tabs += "\t";
+        }
+        var jsonObj = JSON.parse(json);
+        if (typeof jsonObj === "string") {
+            return "\"" + jsonObj + "\"";
+        }
+        else if (typeof jsonObj === "boolean") {
+            return jsonObj.toString();
+        }
+        else if (typeof jsonObj === "number") {
+            return jsonObj.toString();
+        }
+        else if (Array.isArray(jsonObj)) {
+            var result = "(\n";
+            for (var i = 0; i < jsonObj.length; i++) {
+                result += tabs + "\t" + ObjectUtils.getPsObjectFromJson(JSON.stringify(jsonObj[i]), nestingLevel + 1) + "\n";
+            }
+            return result + tabs + ")";
+        }
+        else if (typeof jsonObj === "object") {
+            var result = "@{\n";
+            for (var prop in jsonObj) {
+                if (jsonObj.hasOwnProperty(prop)) {
+                    result += tabs + "\t" + prop + " = " + ObjectUtils.getPsObjectFromJson(JSON.stringify(jsonObj[prop]), nestingLevel + 1) + "\n";
+                }
+            }
+            return result + tabs + "}\n";
+        }
+        return json;
+    }
+}
+class StringUtils {
+    static selectiveUrlencode(url) {
+        return url.replace(/\#/g, '%23').replace(/\s/g, '%20');
+    }
+    static stringify(object) {
+        return JSON.stringify(object, undefined, 2);
+    }
+    static escapeHtmlEntities(str) {
+        return $('<div/>').text(str).html();
+    }
+    static syntaxHighlight(json) {
+        if (typeof json === "string")
+            return StringUtils.escapeHtmlEntities(json);
+        let str = this.stringify(json);
+        str = StringUtils.escapeHtmlEntities(str);
+        return str.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+            var cls = 'number';
+            if (/^"/.test(match)) {
+                if (/:$/.test(match)) {
+                    cls = 'key';
+                }
+                else {
+                    cls = 'string';
+                }
+            }
+            else if (/true|false/.test(match)) {
+                cls = 'boolean';
+            }
+            else if (/null/.test(match)) {
+                cls = 'null';
+            }
+            if (cls === 'string' && ((match.slice(0, "\"http://".length) == "\"http://") || (match.slice(0, "\"https://".length) == "\"https://"))) {
+                match = match.replace("/api/", "/");
+                return '<span><a class="json-link" target="_blank" href=' + match + '>' + match + '</a></span>';
+            }
+            else {
+                return '<span class="' + cls + '">' + match + '</span>';
+            }
+        });
+    }
+}
+if (!Element.prototype.documentOffsetTop) {
+    Element.prototype.documentOffsetTop = function () {
+        return this.offsetTop + (this.offsetParent ? this.offsetParent.documentOffsetTop() : 0);
+    };
+}
+var armExplorer;
+(function (armExplorer) {
+    class StringDictionary {
+        constructor() {
+            this.items = {};
+        }
+        contains(key) {
+            return this.items.hasOwnProperty(key);
+        }
+        put(key, value) {
+            this.items[key] = value;
+        }
+        get(key) {
+            return this.items[key];
+        }
+    }
+    armExplorer.StringDictionary = StringDictionary;
+})(armExplorer || (armExplorer = {}));
+if (!String.prototype.compare) {
+    String.prototype.compare = function (target, ignoreCase) {
+        var selfValue = this;
+        var targetValue = target || "";
+        if (ignoreCase) {
+            selfValue = selfValue.toLowerCase();
+            targetValue = targetValue.toLowerCase();
+        }
+        if (selfValue > targetValue) {
+            return 1;
+        }
+        else if (selfValue < targetValue) {
+            return -1;
+        }
+        else {
+            return 0;
+        }
+    };
+}
+if (!String.prototype.startsWith) {
+    String.prototype.startsWith = function (str) {
+        return this.slice(0, str.length) === str;
+    };
+}
+if (!String.prototype.endsWith) {
+    String.prototype.endsWith = function (str) {
+        return this.indexOf(str, this.length - str.length) !== -1;
+    };
+}
+if (!String.prototype.contains) {
+    String.prototype.contains = function (str, ignoreCase) {
+        var selfValue = this;
+        var searchValue = str || "";
+        if (ignoreCase) {
+            selfValue = selfValue.toLowerCase();
+            searchValue = searchValue.toLowerCase();
+        }
+        return selfValue.indexOf(searchValue) !== -1;
+    };
+}
+if (!Array.prototype.includes) {
+    Array.prototype.includes = function (searchElement) {
+        if (this === undefined || this === null) {
+            throw new TypeError('Cannot convert this value to object');
+        }
+        var O = Object(this);
+        var len = parseInt(O.length) || 0;
+        if (len === 0) {
+            return false;
+        }
+        var k = 0;
+        while (k < len) {
+            var currentElement = O[k];
+            if (searchElement === currentElement ||
+                (searchElement !== searchElement && currentElement !== currentElement)) {
+                return true;
+            }
+            k++;
+        }
+        return false;
+    };
+}
+Array.prototype.remove = function (from, to) {
+    var rest = this.slice((to || from) + 1 || this.length);
+    this.length = from < 0 ? this.length + from : from;
+    return this.push.apply(this, rest);
+};
+Array.prototype.getUnique = function (getValue) {
+    var u = {}, a = [];
+    for (var i = 0, l = this.length; i < l; ++i) {
+        var value = getValue(this[i]);
+        if (u.hasOwnProperty(value)) {
+            continue;
+        }
+        a.push(this[i]);
+        u[value] = 1;
+    }
+    return a;
+};
+Array.prototype.indexOfDelegate = function (predicate, fromIndex) {
+    var k;
+    if (this == null) {
+        throw new TypeError('"this" is null or not defined');
+    }
+    var O = Object(this);
+    var len = O.length >>> 0;
+    if (len === 0) {
+        return -1;
+    }
+    var n = +fromIndex || 0;
+    if (Math.abs(n) === Infinity) {
+        n = 0;
+    }
+    if (n >= len) {
+        return -1;
+    }
+    k = Math.max(n >= 0 ? n : len - Math.abs(n), 0);
+    while (k < len) {
+        var kValue;
+        if (k in O && predicate(O[k])) {
+            return k;
+        }
+        k++;
+    }
+    return -1;
+};
+if (!Array.prototype.some) {
+    Array.prototype.some = function (fun) {
+        'use strict';
+        if (this == null) {
+            throw new TypeError('Array.prototype.some called on null or undefined');
+        }
+        if (typeof fun !== 'function') {
+            throw new TypeError();
+        }
+        var t = Object(this);
+        var len = t.length >>> 0;
+        var thisArg = arguments.length >= 2 ? arguments[1] : void 0;
+        for (var i = 0; i < len; i++) {
+            if (i in t && fun.call(thisArg, t[i], i, t)) {
+                return true;
+            }
+        }
+        return false;
+    };
+}
+if (!Array.prototype.last) {
+    Array.prototype.last = function () {
+        return this[this.length - 1];
+    };
+}
+;
+if (!Array.prototype.find) {
+    Array.prototype.find = function (predicate) {
+        if (this == null) {
+            throw new TypeError('Array.prototype.find called on null or undefined');
+        }
+        if (typeof predicate !== 'function') {
+            throw new TypeError('predicate must be a function');
+        }
+        var list = Object(this);
+        var length = list.length >>> 0;
+        var thisArg = arguments[1];
+        var value;
+        for (var i = 0; i < length; i++) {
+            value = list[i];
+            if (predicate.call(thisArg, value, i, list)) {
+                return value;
+            }
+        }
+        return undefined;
+    };
+}
 class Action {
     constructor(httpMethod, name, url) {
         this.httpMethod = httpMethod;
@@ -2002,6 +1912,32 @@ class ResourceDefinition {
     }
     hideFromExplorerView() {
         return (this.actions.length === 0) && !this.url.contains("providers", true);
+    }
+}
+class TenantCollection {
+    constructor(repository) {
+        this.repository = repository;
+        this.tenants = [];
+    }
+    getTenants() {
+        return this.tenants;
+    }
+    getSelectedTenant() {
+        return this.selectedTenant;
+    }
+    buildTenants() {
+        return __awaiter(this, void 0, void 0, function* () {
+            let tenantsResponse = yield this.repository.getTenants();
+            let tenantsData = tenantsResponse.data;
+            this.tenants = tenantsData.map(tenant => {
+                return {
+                    name: tenant.DisplayName + " (" + tenant.DomainName + ")",
+                    id: tenant.TenantId,
+                    current: tenant.Current
+                };
+            });
+            this.selectedTenant = this.tenants[this.tenants.indexOfDelegate(tenant => tenant.current)];
+        });
     }
 }
 class TreeBranch {
@@ -2211,6 +2147,375 @@ var armExplorer;
         }
     }
     armExplorer.ARMUrlParser = ARMUrlParser;
+})(armExplorer || (armExplorer = {}));
+var armExplorer;
+(function (armExplorer) {
+    class ScriptParametersResolver {
+        constructor(urlParser) {
+            this.urlParser = urlParser;
+            this.supportedCommands = [];
+            this.fillSupportedCommands();
+        }
+        fillSupportedCommands() {
+            let resourceActions = this.urlParser.getResourceActions();
+            if (this.urlParser.getHttpMethod().contains(armExplorer.HttpVerb[armExplorer.HttpVerb.GET], true)) {
+                this.supportedCommands.push({ cmd: CmdType.Get, isAction: false, isSetAction: false });
+            }
+            else if (this.urlParser.getHttpMethod().contains(armExplorer.HttpVerb[armExplorer.HttpVerb.POST], true) && this.urlParser.getOriginalURL().contains("list", true)) {
+                this.supportedCommands.push({ cmd: CmdType.Invoke, isAction: false, isSetAction: false });
+            }
+            if (resourceActions.some(a => (a.toUpperCase() === armExplorer.ResourceActions[armExplorer.ResourceActions.PATCH] || a.toUpperCase() === armExplorer.ResourceActions[armExplorer.ResourceActions.PUT]))) {
+                if (resourceActions.includes(armExplorer.ResourceActions[armExplorer.ResourceActions.GET])) {
+                    this.supportedCommands.push({ cmd: CmdType.Set, isAction: false, isSetAction: true });
+                }
+                else {
+                    this.supportedCommands.push({ cmd: CmdType.New, isAction: false, isSetAction: true });
+                }
+            }
+            if (resourceActions.includes(armExplorer.ResourceActions[armExplorer.ResourceActions.CREATE])) {
+                if (this.urlParser.isResourceGroupURL()) {
+                    this.supportedCommands.push({ cmd: CmdType.NewResourceGroup, isAction: false, isSetAction: false });
+                }
+                else {
+                    this.supportedCommands.push({ cmd: CmdType.New, isAction: false, isSetAction: false });
+                }
+            }
+            if (this.urlParser.getActions().length > 0) {
+                this.urlParser.getActions().forEach(action => {
+                    if (action.httpMethod.toUpperCase() === armExplorer.HttpVerb[armExplorer.HttpVerb.DELETE]) {
+                        this.supportedCommands.push({ cmd: CmdType.RemoveAction, isAction: true, isSetAction: false });
+                    }
+                    else if (action.httpMethod.toUpperCase() === armExplorer.HttpVerb[armExplorer.HttpVerb.POST]) {
+                        this.supportedCommands.push({ cmd: CmdType.InvokeAction, isAction: true, isSetAction: false });
+                    }
+                });
+            }
+        }
+        getResourceGroup() {
+            return this.urlParser.getResourceGroup();
+        }
+        getSubscriptionId() {
+            return this.urlParser.getSubscriptionId();
+        }
+        getCompleteResourceId() {
+            return this.urlParser.getOriginalURL().substring(this.urlParser.getOriginalURL().indexOf("/subscriptions"));
+        }
+        getSupportedCommands() {
+            return this.supportedCommands;
+        }
+        doGetActionName(url) {
+            return url.substr(url.lastIndexOf("/") + 1, url.length - url.lastIndexOf("/") - 1);
+        }
+        getActionName() {
+            return this.doGetActionName(this.urlParser.getURL());
+        }
+        getActionParameters(actionIndex) {
+            return this.urlParser.getActions()[actionIndex];
+        }
+        getActionNameFromAction(actionIndex) {
+            return this.doGetActionName(this.getActionParameters(actionIndex).url);
+        }
+        getActionNameFromList() {
+            return this.doGetActionName(this.urlParser.getURL().replace("/list", ""));
+        }
+        getResourceName() {
+            return this.urlParser.getURL().substr(this.urlParser.getURL().lastIndexOf("/") + 1, this.urlParser.getURL().length - this.urlParser.getURL().lastIndexOf("/") - 2);
+        }
+        supportsCollection(resourceName) {
+            return !!(!resourceName && (typeof this.urlParser.getResourceDefinitionChildren() === "string")) && this.urlParser.hasResourceProvider();
+        }
+        getParameters() {
+            let cmd = {};
+            cmd.apiVersion = this.urlParser.getAPIVersion();
+            cmd.resourceIdentifier = this.urlParser.getResourceIdentifier();
+            cmd.isCollection = this.supportsCollection(cmd.resourceIdentifier.resourceName);
+            return cmd;
+        }
+    }
+    armExplorer.ScriptParametersResolver = ScriptParametersResolver;
+})(armExplorer || (armExplorer = {}));
+var armExplorer;
+(function (armExplorer) {
+    class ScriptInternals {
+        static init() {
+            if (!this.initialized) {
+                this.initialized = true;
+                this.classNameMap.push([armExplorer.CliResourceType.Subscriptions, "Subscriptions"]);
+                this.classNameMap.push([armExplorer.CliResourceType.Subscription, "Subscription"]);
+                this.classNameMap.push([armExplorer.CliResourceType.SubscriptionLocations, "SubscriptionLocations"]);
+                this.classNameMap.push([armExplorer.CliResourceType.ResourceGroups, "ResourceGroups"]);
+                this.classNameMap.push([armExplorer.CliResourceType.ResourceGroup, "ResourceGroup"]);
+                this.classNameMap.push([armExplorer.CliResourceType.WebApps, "WebApps"]);
+                this.classNameMap.push([armExplorer.CliResourceType.WebApp, "WebApp"]);
+                this.classNameMap.push([armExplorer.CliResourceType.GenericResource, "GenericResource"]);
+                this.psToCliActionMap.push([CmdType.Get, armExplorer.ResourceAction.Get]);
+                this.psToCliActionMap.push([CmdType.Invoke, armExplorer.ResourceAction.Invoke]);
+                this.psToCliActionMap.push([CmdType.InvokeAction, armExplorer.ResourceAction.InvokeAction]);
+                this.psToCliActionMap.push([CmdType.Set, armExplorer.ResourceAction.Set]);
+                this.psToCliActionMap.push([CmdType.New, armExplorer.ResourceAction.New]);
+                this.psToCliActionMap.push([CmdType.RemoveAction, armExplorer.ResourceAction.RemoveAction]);
+                this.psToCliActionMap.push([CmdType.NewResourceGroup, armExplorer.ResourceAction.NewResourceGroup]);
+            }
+        }
+        static getClassName(resType) {
+            return this.classNameMap.find(item => item[0] === resType)[1];
+        }
+        static getCliResourceType(cmdType) {
+            return this.psToCliActionMap.find(item => item[0] === cmdType)[1];
+        }
+    }
+    ScriptInternals.classNameMap = [];
+    ScriptInternals.psToCliActionMap = [];
+    ScriptInternals.initialized = false;
+    armExplorer.ScriptInternals = ScriptInternals;
+    function getAzureCliScriptsForResource(value) {
+        const parser = new armExplorer.ARMUrlParser(value, []);
+        const resolver = new armExplorer.ScriptParametersResolver(parser);
+        const resourceHandlerResolver = new armExplorer.ResourceHandlerResolver(resolver);
+        const scriptGenerator = new armExplorer.CliScriptGenerator(resolver, resourceHandlerResolver);
+        return scriptGenerator.getScript();
+    }
+    armExplorer.getAzureCliScriptsForResource = getAzureCliScriptsForResource;
+    function getPowerShellScriptsForResource(value, actions) {
+        var script = "# PowerShell equivalent script\n\n";
+        let urlParser = new armExplorer.ARMUrlParser(value, actions);
+        let parameterResolver = new armExplorer.ScriptParametersResolver(urlParser);
+        let scriptGenerator = new armExplorer.PowerShellScriptGenerator(parameterResolver);
+        for (let cmd of parameterResolver.getSupportedCommands()) {
+            script += scriptGenerator.getScript(cmd);
+        }
+        return script;
+    }
+    armExplorer.getPowerShellScriptsForResource = getPowerShellScriptsForResource;
+    function getAnsibleScriptsForResource(value, actions, resourceDefinition) {
+        var script = "# Ansible Playbooks\n\n";
+        let urlParser = new armExplorer.ARMUrlParser(value, actions);
+        let parameterResolver = new armExplorer.ScriptParametersResolver(urlParser);
+        let scriptGenerator = new armExplorer.AnsibleScriptGenerator(parameterResolver, resourceDefinition);
+        for (let cmd of parameterResolver.getSupportedCommands()) {
+            script += scriptGenerator.getScript(cmd);
+        }
+        return script;
+    }
+    armExplorer.getAnsibleScriptsForResource = getAnsibleScriptsForResource;
+})(armExplorer || (armExplorer = {}));
+function strEnum(strings) {
+    return strings.reduce((res, key) => {
+        res[key[0]] = key[1];
+        return res;
+    }, Object.create(null));
+}
+const CmdType = strEnum([
+    ["Get", "Get-AzureRmResource"],
+    ["Invoke", "Invoke-AzureRmResourceAction"],
+    ["InvokeAction", "Invoke-AzureRmResourceAction"],
+    ["Set", "Set-AzureRmResource"],
+    ["New", "New-AzureRmResource"],
+    ["RemoveAction", "Remove-AzureRmResource"],
+    ["NewResourceGroup", "New-AzureRmResourceGroup"]
+]);
+(function (armExplorer) {
+    let CliResourceType;
+    (function (CliResourceType) {
+        CliResourceType[CliResourceType["Subscriptions"] = 0] = "Subscriptions";
+        CliResourceType[CliResourceType["Subscription"] = 1] = "Subscription";
+        CliResourceType[CliResourceType["SubscriptionLocations"] = 2] = "SubscriptionLocations";
+        CliResourceType[CliResourceType["ResourceGroups"] = 3] = "ResourceGroups";
+        CliResourceType[CliResourceType["ResourceGroup"] = 4] = "ResourceGroup";
+        CliResourceType[CliResourceType["WebApps"] = 5] = "WebApps";
+        CliResourceType[CliResourceType["WebApp"] = 6] = "WebApp";
+        CliResourceType[CliResourceType["GenericResource"] = 7] = "GenericResource";
+    })(CliResourceType = armExplorer.CliResourceType || (armExplorer.CliResourceType = {}));
+    let ResourceIdentifierType;
+    (function (ResourceIdentifierType) {
+        ResourceIdentifierType[ResourceIdentifierType["WithIDOnly"] = 0] = "WithIDOnly";
+        ResourceIdentifierType[ResourceIdentifierType["WithGroupType"] = 1] = "WithGroupType";
+        ResourceIdentifierType[ResourceIdentifierType["WithGroupTypeName"] = 2] = "WithGroupTypeName";
+    })(ResourceIdentifierType = armExplorer.ResourceIdentifierType || (armExplorer.ResourceIdentifierType = {}));
+    let ResourceAction;
+    (function (ResourceAction) {
+        ResourceAction[ResourceAction["Get"] = 0] = "Get";
+        ResourceAction[ResourceAction["Invoke"] = 1] = "Invoke";
+        ResourceAction[ResourceAction["InvokeAction"] = 2] = "InvokeAction";
+        ResourceAction[ResourceAction["Set"] = 3] = "Set";
+        ResourceAction[ResourceAction["New"] = 4] = "New";
+        ResourceAction[ResourceAction["RemoveAction"] = 5] = "RemoveAction";
+        ResourceAction[ResourceAction["NewResourceGroup"] = 6] = "NewResourceGroup";
+    })(ResourceAction = armExplorer.ResourceAction || (armExplorer.ResourceAction = {}));
+    let ResourceActions;
+    (function (ResourceActions) {
+        ResourceActions[ResourceActions["PATCH"] = 0] = "PATCH";
+        ResourceActions[ResourceActions["PUT"] = 1] = "PUT";
+        ResourceActions[ResourceActions["GET"] = 2] = "GET";
+        ResourceActions[ResourceActions["CREATE"] = 3] = "CREATE";
+    })(ResourceActions = armExplorer.ResourceActions || (armExplorer.ResourceActions = {}));
+    let HttpVerb;
+    (function (HttpVerb) {
+        HttpVerb[HttpVerb["GET"] = 0] = "GET";
+        HttpVerb[HttpVerb["POST"] = 1] = "POST";
+        HttpVerb[HttpVerb["DELETE"] = 2] = "DELETE";
+    })(HttpVerb = armExplorer.HttpVerb || (armExplorer.HttpVerb = {}));
+})(armExplorer || (armExplorer = {}));
+var armExplorer;
+(function (armExplorer) {
+    class AnsibleScriptGenerator {
+        constructor(resolver, resourceDefinition) {
+            this.resolver = resolver;
+            this.script = "";
+            this.actionsIndex = 0;
+            this.resourceDefinition = {};
+            this.resourceDefinition = resourceDefinition;
+        }
+        getScript(cmdActionPair) {
+            const cmdParameters = this.resolver.getParameters();
+            let currentScript = "";
+            currentScript += "- hosts: localhost\n";
+            currentScript += "  tasks:\n";
+            switch (cmdActionPair.cmd) {
+                case CmdType.Get: {
+                    currentScript += '    - name: GET ' + this.resolver.getActionName() + '\n';
+                    currentScript += '      azure_rm_resource_facts:\n';
+                    currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
+                    break;
+                }
+                case CmdType.New: {
+                    if (cmdActionPair.isSetAction) {
+                        currentScript += '    - name: SET ' + this.resolver.getActionName() + '\n';
+                        currentScript += '      azure_rm_resource:\n';
+                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
+                    }
+                    else {
+                        currentScript += '    - name: CREATE ' + this.resolver.getActionName() + '\n';
+                        currentScript += '      azure_rm_resource:\n';
+                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
+                    }
+                    if (this.resourceDefinition.requestBody) {
+                        currentScript += "        body:\n";
+                        currentScript += this.yamlFromObject(this.resourceDefinition.requestBody, "          ");
+                    }
+                    break;
+                }
+                case CmdType.Set: {
+                    currentScript += '    - name: SET ' + this.resolver.getActionNameFromList() + '\n';
+                    currentScript += '      azure_rm_resource:\n';
+                    currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
+                    if (this.resourceDefinition.requestBody) {
+                        currentScript += "        body:\n";
+                        currentScript += this.yamlFromObject(this.resourceDefinition.requestBody, "          ");
+                    }
+                    break;
+                }
+                case CmdType.RemoveAction: {
+                    currentScript += '    - name: DELETE ' + this.resolver.getActionNameFromAction(this.actionsIndex) + '\n';
+                    currentScript += '      azure_rm_resource:\n';
+                    currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
+                    currentScript += "        state: absent\n";
+                    this.actionsIndex++;
+                    break;
+                }
+                case CmdType.Invoke:
+                case CmdType.InvokeAction: {
+                    if (cmdActionPair.isAction) {
+                        currentScript += '    - name: Action ' + this.resolver.getActionNameFromAction(this.actionsIndex) + '\n';
+                        currentScript += '      azure_rm_resource:\n';
+                        currentScript += '        method: POST\n';
+                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
+                        const body = this.resolver.getActionParameters(this.actionsIndex).requestBody;
+                        if (body) {
+                            currentScript += "        body:\n";
+                            currentScript += this.yamlFromObject(JSON.parse(body), "          ");
+                        }
+                        this.actionsIndex++;
+                    }
+                    else {
+                        currentScript += '    - name: LIST ' + this.resolver.getActionNameFromList() + '\n';
+                        currentScript += '      azure_rm_resource:\n';
+                        currentScript += this.yamlFromResourceId(cmdActionPair, "        ");
+                    }
+                    break;
+                }
+                case CmdType.NewResourceGroup: {
+                    currentScript += '    - name: CREATE ' + this.resolver.getActionName() + '\n';
+                    currentScript += '      azure_rm_resource:\n';
+                    currentScript += "        api_version: '" + cmdParameters.apiVersion + "'\n";
+                    currentScript += '        resource_group: NewResourceGroup\n';
+                    currentScript += '        body:\n';
+                    currentScript += '          location: eastus\n';
+                    break;
+                }
+            }
+            return currentScript + "\n\n";
+        }
+        yamlFromObject(o, prefix) {
+            let yaml = "";
+            let __this = this;
+            for (let key in o) {
+                if (typeof o[key] === 'object') {
+                    if (Array.isArray(o[key])) {
+                        yaml += prefix + key + ":\n";
+                        o[key].forEach(function (e) {
+                            if (typeof e != 'object') {
+                                yaml += prefix + "  - " + e + "\n";
+                            }
+                            else {
+                                yaml += __this.yamlFromObject(e, prefix + "  - ");
+                            }
+                        });
+                    }
+                    else {
+                        yaml += prefix + key + ":\n";
+                        yaml += this.yamlFromObject(o[key], prefix + "  ");
+                    }
+                }
+                else {
+                    yaml += prefix + key + ": " + o[key] + "\n";
+                }
+                if (prefix.indexOf('-') >= 0)
+                    prefix = prefix.replace('-', ' ');
+            }
+            return yaml;
+        }
+        yamlFromResourceId(cmdActionPair, prefix) {
+            let yaml = "";
+            const cmdParameters = this.resolver.getParameters();
+            switch (cmdParameters.resourceIdentifier.resourceIdentifierType) {
+                case armExplorer.ResourceIdentifierType.WithIDOnly: {
+                    yaml += prefix + "api_version: '" + cmdParameters.apiVersion + "'\n";
+                    yaml += prefix + "url: " + cmdParameters.resourceIdentifier.resourceId + "\n";
+                    break;
+                }
+                case armExplorer.ResourceIdentifierType.WithGroupType: {
+                    yaml += prefix + "api_version: '" + cmdParameters.apiVersion + "'\n";
+                    yaml += prefix + "resource_group: '" + cmdParameters.resourceIdentifier.resourceGroup + "'\n";
+                    yaml += prefix + "provider: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[0].split('.')[1] + "'\n";
+                    yaml += prefix + "resource_type: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[1] + "'\n";
+                    if (cmdActionPair.cmd == CmdType.New && !cmdActionPair.isSetAction) {
+                        yaml += prefix + "resource_name: '{{ name }}'\n";
+                    }
+                    break;
+                }
+                case armExplorer.ResourceIdentifierType.WithGroupTypeName: {
+                    yaml += prefix + "api_version: '" + cmdParameters.apiVersion + "'\n";
+                    yaml += prefix + "resource_group: '" + cmdParameters.resourceIdentifier.resourceGroup + "'\n";
+                    yaml += prefix + "provider: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[0].split('.')[1] + "'\n";
+                    yaml += prefix + "resource_type: '" + cmdParameters.resourceIdentifier.resourceType.split('/')[1] + "'\n";
+                    const split_name = cmdParameters.resourceIdentifier.resourceName.split('/');
+                    yaml += prefix + "resource_name: '" + split_name[0] + "'\n";
+                    if (split_name.length > 1) {
+                        yaml += prefix + "subresource:\n";
+                        yaml += prefix + "  - type: " + split_name[1] + "\n";
+                    }
+                    else if (cmdActionPair.isAction) {
+                        yaml += prefix + "subresource:\n";
+                        yaml += prefix + "  - type: " + this.resolver.getActionNameFromAction(this.actionsIndex) + "\n";
+                    }
+                    break;
+                }
+            }
+            return yaml;
+        }
+    }
+    armExplorer.AnsibleScriptGenerator = AnsibleScriptGenerator;
 })(armExplorer || (armExplorer = {}));
 var armExplorer;
 (function (armExplorer) {
@@ -2718,308 +3023,4 @@ var armExplorer;
     }
     armExplorer.PowerShellScriptGenerator = PowerShellScriptGenerator;
 })(armExplorer || (armExplorer = {}));
-var armExplorer;
-(function (armExplorer) {
-    class ScriptInternals {
-        static init() {
-            if (!this.initialized) {
-                this.initialized = true;
-                this.classNameMap.push([armExplorer.CliResourceType.Subscriptions, "Subscriptions"]);
-                this.classNameMap.push([armExplorer.CliResourceType.Subscription, "Subscription"]);
-                this.classNameMap.push([armExplorer.CliResourceType.SubscriptionLocations, "SubscriptionLocations"]);
-                this.classNameMap.push([armExplorer.CliResourceType.ResourceGroups, "ResourceGroups"]);
-                this.classNameMap.push([armExplorer.CliResourceType.ResourceGroup, "ResourceGroup"]);
-                this.classNameMap.push([armExplorer.CliResourceType.WebApps, "WebApps"]);
-                this.classNameMap.push([armExplorer.CliResourceType.WebApp, "WebApp"]);
-                this.classNameMap.push([armExplorer.CliResourceType.GenericResource, "GenericResource"]);
-                this.psToCliActionMap.push([CmdType.Get, armExplorer.ResourceAction.Get]);
-                this.psToCliActionMap.push([CmdType.Invoke, armExplorer.ResourceAction.Invoke]);
-                this.psToCliActionMap.push([CmdType.InvokeAction, armExplorer.ResourceAction.InvokeAction]);
-                this.psToCliActionMap.push([CmdType.Set, armExplorer.ResourceAction.Set]);
-                this.psToCliActionMap.push([CmdType.New, armExplorer.ResourceAction.New]);
-                this.psToCliActionMap.push([CmdType.RemoveAction, armExplorer.ResourceAction.RemoveAction]);
-                this.psToCliActionMap.push([CmdType.NewResourceGroup, armExplorer.ResourceAction.NewResourceGroup]);
-            }
-        }
-        static getClassName(resType) {
-            return this.classNameMap.find(item => item[0] === resType)[1];
-        }
-        static getCliResourceType(cmdType) {
-            return this.psToCliActionMap.find(item => item[0] === cmdType)[1];
-        }
-    }
-    ScriptInternals.classNameMap = [];
-    ScriptInternals.psToCliActionMap = [];
-    ScriptInternals.initialized = false;
-    armExplorer.ScriptInternals = ScriptInternals;
-    function getAzureCliScriptsForResource(value) {
-        const parser = new armExplorer.ARMUrlParser(value, []);
-        const resolver = new armExplorer.ScriptParametersResolver(parser);
-        const resourceHandlerResolver = new armExplorer.ResourceHandlerResolver(resolver);
-        const scriptGenerator = new armExplorer.CliScriptGenerator(resolver, resourceHandlerResolver);
-        return scriptGenerator.getScript();
-    }
-    armExplorer.getAzureCliScriptsForResource = getAzureCliScriptsForResource;
-    function getPowerShellScriptsForResource(value, actions) {
-        var script = "# PowerShell equivalent script\n\n";
-        let urlParser = new armExplorer.ARMUrlParser(value, actions);
-        let parameterResolver = new armExplorer.ScriptParametersResolver(urlParser);
-        let scriptGenerator = new armExplorer.PowerShellScriptGenerator(parameterResolver);
-        for (let cmd of parameterResolver.getSupportedCommands()) {
-            script += scriptGenerator.getScript(cmd);
-        }
-        return script;
-    }
-    armExplorer.getPowerShellScriptsForResource = getPowerShellScriptsForResource;
-    function getAnsibleScriptsForResource(value, actions, resourceDefinition) {
-        var script = "# Ansible Playbooks\n\n";
-        let urlParser = new armExplorer.ARMUrlParser(value, actions);
-        let parameterResolver = new armExplorer.ScriptParametersResolver(urlParser);
-        let scriptGenerator = new armExplorer.AnsibleScriptGenerator(parameterResolver, resourceDefinition);
-        for (let cmd of parameterResolver.getSupportedCommands()) {
-            script += scriptGenerator.getScript(cmd);
-        }
-        return script;
-    }
-    armExplorer.getAnsibleScriptsForResource = getAnsibleScriptsForResource;
-})(armExplorer || (armExplorer = {}));
-function strEnum(strings) {
-    return strings.reduce((res, key) => {
-        res[key[0]] = key[1];
-        return res;
-    }, Object.create(null));
-}
-const CmdType = strEnum([
-    ["Get", "Get-AzureRmResource"],
-    ["Invoke", "Invoke-AzureRmResourceAction"],
-    ["InvokeAction", "Invoke-AzureRmResourceAction"],
-    ["Set", "Set-AzureRmResource"],
-    ["New", "New-AzureRmResource"],
-    ["RemoveAction", "Remove-AzureRmResource"],
-    ["NewResourceGroup", "New-AzureRmResourceGroup"]
-]);
-(function (armExplorer) {
-    let CliResourceType;
-    (function (CliResourceType) {
-        CliResourceType[CliResourceType["Subscriptions"] = 0] = "Subscriptions";
-        CliResourceType[CliResourceType["Subscription"] = 1] = "Subscription";
-        CliResourceType[CliResourceType["SubscriptionLocations"] = 2] = "SubscriptionLocations";
-        CliResourceType[CliResourceType["ResourceGroups"] = 3] = "ResourceGroups";
-        CliResourceType[CliResourceType["ResourceGroup"] = 4] = "ResourceGroup";
-        CliResourceType[CliResourceType["WebApps"] = 5] = "WebApps";
-        CliResourceType[CliResourceType["WebApp"] = 6] = "WebApp";
-        CliResourceType[CliResourceType["GenericResource"] = 7] = "GenericResource";
-    })(CliResourceType = armExplorer.CliResourceType || (armExplorer.CliResourceType = {}));
-    let ResourceIdentifierType;
-    (function (ResourceIdentifierType) {
-        ResourceIdentifierType[ResourceIdentifierType["WithIDOnly"] = 0] = "WithIDOnly";
-        ResourceIdentifierType[ResourceIdentifierType["WithGroupType"] = 1] = "WithGroupType";
-        ResourceIdentifierType[ResourceIdentifierType["WithGroupTypeName"] = 2] = "WithGroupTypeName";
-    })(ResourceIdentifierType = armExplorer.ResourceIdentifierType || (armExplorer.ResourceIdentifierType = {}));
-    let ResourceAction;
-    (function (ResourceAction) {
-        ResourceAction[ResourceAction["Get"] = 0] = "Get";
-        ResourceAction[ResourceAction["Invoke"] = 1] = "Invoke";
-        ResourceAction[ResourceAction["InvokeAction"] = 2] = "InvokeAction";
-        ResourceAction[ResourceAction["Set"] = 3] = "Set";
-        ResourceAction[ResourceAction["New"] = 4] = "New";
-        ResourceAction[ResourceAction["RemoveAction"] = 5] = "RemoveAction";
-        ResourceAction[ResourceAction["NewResourceGroup"] = 6] = "NewResourceGroup";
-    })(ResourceAction = armExplorer.ResourceAction || (armExplorer.ResourceAction = {}));
-    let ResourceActions;
-    (function (ResourceActions) {
-        ResourceActions[ResourceActions["PATCH"] = 0] = "PATCH";
-        ResourceActions[ResourceActions["PUT"] = 1] = "PUT";
-        ResourceActions[ResourceActions["GET"] = 2] = "GET";
-        ResourceActions[ResourceActions["CREATE"] = 3] = "CREATE";
-    })(ResourceActions = armExplorer.ResourceActions || (armExplorer.ResourceActions = {}));
-    let HttpVerb;
-    (function (HttpVerb) {
-        HttpVerb[HttpVerb["GET"] = 0] = "GET";
-        HttpVerb[HttpVerb["POST"] = 1] = "POST";
-        HttpVerb[HttpVerb["DELETE"] = 2] = "DELETE";
-    })(HttpVerb = armExplorer.HttpVerb || (armExplorer.HttpVerb = {}));
-})(armExplorer || (armExplorer = {}));
-var armExplorer;
-(function (armExplorer) {
-    class ScriptParametersResolver {
-        constructor(urlParser) {
-            this.urlParser = urlParser;
-            this.supportedCommands = [];
-            this.fillSupportedCommands();
-        }
-        fillSupportedCommands() {
-            let resourceActions = this.urlParser.getResourceActions();
-            if (this.urlParser.getHttpMethod().contains(armExplorer.HttpVerb[armExplorer.HttpVerb.GET], true)) {
-                this.supportedCommands.push({ cmd: CmdType.Get, isAction: false, isSetAction: false });
-            }
-            else if (this.urlParser.getHttpMethod().contains(armExplorer.HttpVerb[armExplorer.HttpVerb.POST], true) && this.urlParser.getOriginalURL().contains("list", true)) {
-                this.supportedCommands.push({ cmd: CmdType.Invoke, isAction: false, isSetAction: false });
-            }
-            if (resourceActions.some(a => (a.toUpperCase() === armExplorer.ResourceActions[armExplorer.ResourceActions.PATCH] || a.toUpperCase() === armExplorer.ResourceActions[armExplorer.ResourceActions.PUT]))) {
-                if (resourceActions.includes(armExplorer.ResourceActions[armExplorer.ResourceActions.GET])) {
-                    this.supportedCommands.push({ cmd: CmdType.Set, isAction: false, isSetAction: true });
-                }
-                else {
-                    this.supportedCommands.push({ cmd: CmdType.New, isAction: false, isSetAction: true });
-                }
-            }
-            if (resourceActions.includes(armExplorer.ResourceActions[armExplorer.ResourceActions.CREATE])) {
-                if (this.urlParser.isResourceGroupURL()) {
-                    this.supportedCommands.push({ cmd: CmdType.NewResourceGroup, isAction: false, isSetAction: false });
-                }
-                else {
-                    this.supportedCommands.push({ cmd: CmdType.New, isAction: false, isSetAction: false });
-                }
-            }
-            if (this.urlParser.getActions().length > 0) {
-                this.urlParser.getActions().forEach(action => {
-                    if (action.httpMethod.toUpperCase() === armExplorer.HttpVerb[armExplorer.HttpVerb.DELETE]) {
-                        this.supportedCommands.push({ cmd: CmdType.RemoveAction, isAction: true, isSetAction: false });
-                    }
-                    else if (action.httpMethod.toUpperCase() === armExplorer.HttpVerb[armExplorer.HttpVerb.POST]) {
-                        this.supportedCommands.push({ cmd: CmdType.InvokeAction, isAction: true, isSetAction: false });
-                    }
-                });
-            }
-        }
-        getResourceGroup() {
-            return this.urlParser.getResourceGroup();
-        }
-        getSubscriptionId() {
-            return this.urlParser.getSubscriptionId();
-        }
-        getCompleteResourceId() {
-            return this.urlParser.getOriginalURL().substring(this.urlParser.getOriginalURL().indexOf("/subscriptions"));
-        }
-        getSupportedCommands() {
-            return this.supportedCommands;
-        }
-        doGetActionName(url) {
-            return url.substr(url.lastIndexOf("/") + 1, url.length - url.lastIndexOf("/") - 1);
-        }
-        getActionName() {
-            return this.doGetActionName(this.urlParser.getURL());
-        }
-        getActionParameters(actionIndex) {
-            return this.urlParser.getActions()[actionIndex];
-        }
-        getActionNameFromAction(actionIndex) {
-            return this.doGetActionName(this.getActionParameters(actionIndex).url);
-        }
-        getActionNameFromList() {
-            return this.doGetActionName(this.urlParser.getURL().replace("/list", ""));
-        }
-        getResourceName() {
-            return this.urlParser.getURL().substr(this.urlParser.getURL().lastIndexOf("/") + 1, this.urlParser.getURL().length - this.urlParser.getURL().lastIndexOf("/") - 2);
-        }
-        supportsCollection(resourceName) {
-            return !!(!resourceName && (typeof this.urlParser.getResourceDefinitionChildren() === "string")) && this.urlParser.hasResourceProvider();
-        }
-        getParameters() {
-            let cmd = {};
-            cmd.apiVersion = this.urlParser.getAPIVersion();
-            cmd.resourceIdentifier = this.urlParser.getResourceIdentifier();
-            cmd.isCollection = this.supportsCollection(cmd.resourceIdentifier.resourceName);
-            return cmd;
-        }
-    }
-    armExplorer.ScriptParametersResolver = ScriptParametersResolver;
-})(armExplorer || (armExplorer = {}));
-class ArmClientRepository {
-    constructor($http) {
-        this.$http = $http;
-    }
-    getApplicableProvidersAsync() {
-        return __awaiter(this, void 0, void 0, function* () {
-            const applicableProvidersConfig = { method: "GET", url: "api/providers" };
-            return yield this.$http(applicableProvidersConfig);
-        });
-    }
-    getApplicableOperations(providers) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const postProviders = { method: "POST", url: "api/all-operations", data: JSON.stringify(providers.data) };
-            return yield this.$http(postProviders);
-        });
-    }
-    getTenants() {
-        return __awaiter(this, void 0, void 0, function* () {
-            const tenantsConfig = { method: "GET", url: "api/tenants" };
-            return yield this.$http(tenantsConfig);
-        });
-    }
-    getUserToken() {
-        return __awaiter(this, void 0, void 0, function* () {
-            const userTokenConfig = { method: "GET", url: "api/token" };
-            return yield this.$http(userTokenConfig);
-        });
-    }
-    searchKeyword(keyword) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const searchConfig = { method: "GET", url: `api/search?keyword=${keyword}` };
-            return yield this.$http(searchConfig);
-        });
-    }
-    invokeAction(selectedResource, action, actionsModel) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const invokeConfig = {
-                method: "POST",
-                url: "api/operations",
-                data: {
-                    Url: action.url,
-                    RequestBody: action.getRequestBody(),
-                    HttpMethod: action.httpMethod,
-                    ApiVersion: selectedResource.apiVersion,
-                    QueryString: action.getQueryString(actionsModel)
-                }
-            };
-            return yield this.$http(invokeConfig);
-        });
-    }
-    invokeHttp(httpConfig) {
-        return __awaiter(this, void 0, void 0, function* () {
-            return yield this.$http(httpConfig);
-        });
-    }
-    invokePut(selectedResource, action, editorCollection) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const userObject = editorCollection.getValue(Editor.RequestEditor, true);
-            const invokePutConfig = {
-                method: "POST",
-                url: "api/operations",
-                data: {
-                    Url: selectedResource.putUrl,
-                    HttpMethod: action.httpMethod,
-                    RequestBody: userObject,
-                    ApiVersion: selectedResource.apiVersion
-                }
-            };
-            return yield this.$http(invokePutConfig);
-        });
-    }
-    invokeCreate(newResourceName, selectedResource, action, editorCollection) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const userObject = editorCollection.getValue(Editor.CreateEditor, true);
-            const invokeCreateConfig = {
-                method: "POST",
-                url: "api/operations",
-                data: {
-                    Url: selectedResource.putUrl + "/" + newResourceName,
-                    HttpMethod: "PUT",
-                    RequestBody: userObject,
-                    ApiVersion: selectedResource.apiVersion
-                }
-            };
-            return yield this.$http(invokeCreateConfig);
-        });
-    }
-    getProvidersForSubscription(subscriptionId) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const getProvidersConfig = {
-                method: "GET",
-                url: `api/operations/providers/${subscriptionId}`
-            };
-            return yield this.$http(getProvidersConfig);
-        });
-    }
-}
+//# sourceMappingURL=manage.js.map

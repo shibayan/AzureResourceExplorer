@@ -1,0 +1,16 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "target": "ES2015",
+    "noImplicitAny": false,
+    "removeComments": true,
+    "preserveConstEnums": true,
+    "sourceMap": true,
+    "outFile": "../wwwroot/ng/manage.js",
+    "listFiles": false
+  },
+  "exclude": [
+    "node_modules",
+    "test"
+  ]
+}
