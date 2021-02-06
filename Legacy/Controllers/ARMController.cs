@@ -208,8 +208,8 @@ namespace ARMExplorer.Controllers
             foreach (var tenant in tenants)
             {
                 var value = new JObject();
-                value["DisplayName"] = tenant["tenantId"];
-                value["DomainName"] = tenant["tenantId"];
+                value["DisplayName"] = tenant["displayName"];
+                value["DomainName"] = tenant["defaultDomain"];
                 value["TenantId"] = tenant["tenantId"];
                 result.Add(value);
             }

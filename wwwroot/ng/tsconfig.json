@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "noImplicitAny": false,
+    "removeComments": false,
+    "preserveConstEnums": true,
+    "sourceMap": false,
+    "outFile": "manageWithTests.js",
+    "listFiles": false
+  },
+  "include": [
+    "**/*"
+  ]
+}
