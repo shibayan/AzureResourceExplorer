@@ -63,7 +63,8 @@ namespace ARMExplorer.Internal
 
         private async Task<IReadOnlyList<T>> GetResourcesCoreAsync<T>(string path)
         {
-            int currentNextLinkDepth = 0;
+            var currentNextLinkDepth = 0;
+
             var resources = new List<T>();
 
             while (!string.IsNullOrEmpty(path))
@@ -72,7 +73,7 @@ namespace ARMExplorer.Internal
 
                 var content = await response.Content.ReadFromJsonAsync<Response<T>>();
 
-                if (content.Value.Length == 0)
+                if (content == null || content.Value.Length == 0)
                 {
                     break;
                 }

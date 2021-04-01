@@ -21,6 +21,8 @@ namespace ARMExplorer.Controllers
 
         private readonly ArmRepository _armRepository;
 
+        public const string TenantIdClaimType = "http://schemas.microsoft.com/identity/claims/tenantid";
+
         [HttpGet("token")]
         public ActionResult GetToken()
         {
@@ -39,7 +41,15 @@ namespace ARMExplorer.Controllers
         {
             var tenants = await _armRepository.GetTenantsAsync();
 
-            return Ok(tenants.Select(x => new TenantDetail { TenantId = x.Id, DisplayName = x.displayName, DomainName = x.defaultDomain }));
+            var tenantId = User.FindFirstValue(TenantIdClaimType);
+
+            return Ok(tenants.Select(x => new TenantDetail
+            {
+                TenantId = x.tenantId,
+                DisplayName = x.displayName,
+                DomainName = x.defaultDomain,
+                Current = x.tenantId == tenantId
+            }));
         }
 
         [HttpGet("search")]

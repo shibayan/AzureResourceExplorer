@@ -6,7 +6,6 @@ using ARMExplorer.Internal;
 using ARMExplorer.Models;
 
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.VisualBasic.CompilerServices;
 
 namespace ARMExplorer.Controllers
 {
